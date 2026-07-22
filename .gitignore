@@ -1,0 +1,33 @@
+# Build artifacts
+dist/
+build/
+*.spec
+*.exe
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.eggs/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+Thumbs.db
+.DS_Store
+
+# User data
+data/*.db
+data/*.json
+
+# Virtual environment
+venv/
+.env
+
+# opencode skills
+.opencode/

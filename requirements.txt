@@ -1,0 +1,18 @@
+# EV-Diag-Tool 依赖清单
+# 安装方式: pip install -r requirements.txt
+
+# === 核心 ===
+PyQt6>=6.5.0              # 桌面 GUI 框架
+
+# === 数据库 ===
+aiosqlite>=0.19.0         # SQLite 异步驱动 (用于数据库操作)
+
+# === AI / Ollama ===
+# Ollama 通过 HTTP API 调用，不需要额外 Python 包
+# 但需要安装 Ollama 桌面端: https://ollama.com/
+
+# === 工具 ===
+pyinstaller>=6.0.0        # 打包 exe (可选)
+
+# === 测试 (可选) ===
+# pytest>=8.0.0

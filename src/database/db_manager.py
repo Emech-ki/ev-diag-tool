@@ -1,0 +1,225 @@
+"""
+数据库管理器
+负责 SQLite 数据库的连接、查询和事务管理
+"""
+
+import sqlite3
+import json
+import os
+from pathlib import Path
+from typing import Optional, List, Dict, Any, Tuple
+
+
+class DatabaseManager:
+    """数据库管理器（单例模式）"""
+
+    _instance = None
+
+    def __new__(cls, db_path: Optional[str] = None):
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+            cls._instance._initialized = False
+        return cls._instance
+
+    def __init__(self, db_path: Optional[str] = None):
+        if self._initialized:
+            return
+
+        if db_path is None:
+            db_path = self._resolve_db_path()
+
+        self.db_path = db_path
+        self._initialized = True
+
+    @staticmethod
+    def _resolve_db_path() -> str:
+        """确定数据库持久化路径（支持 exe 模式）"""
+        import sys, shutil
+
+        is_exe = getattr(sys, "frozen", False)
+
+        if is_exe:
+            # exe 模式：数据库放在 exe 同目录
+            exe_dir = Path(sys.executable).parent
+            dest = exe_dir / "data" / "obd_codes.db"
+
+            # 如果目标不存在，从内嵌的数据库复制一份
+            if not dest.exists():
+                src = Path(sys._MEIPASS) / "data" / "obd_codes.db"
+                if src.exists():
+                    dest.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(str(src), str(dest))
+
+            return str(dest)
+        else:
+            # 开发模式：项目根目录/data/obd_codes.db
+            project_root = Path(__file__).resolve().parent.parent.parent
+            return str(project_root / "data" / "obd_codes.db")
+
+    def get_connection(self) -> sqlite3.Connection:
+        """获取数据库连接（每次调用新建连接，线程安全）"""
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        return conn
+
+    def query_by_code(self, code: str) -> Optional[Dict[str, Any]]:
+        """
+        根据故障码查询
+
+        Args:
+            code: 故障码，如 "P0300"
+
+        Returns:
+            故障码信息字典，未找到返回 None
+        """
+        conn = self.get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM obd_codes WHERE code = ?", (code.upper(),))
+            row = cursor.fetchone()
+            if row is None:
+                return None
+            return dict(row)
+        finally:
+            conn.close()
+
+    def search_codes(self, keyword: str, limit: int = 20) -> List[Dict[str, Any]]:
+        """
+        搜索故障码（模糊匹配）
+
+        Args:
+            keyword: 搜索关键词（匹配code或description）
+            limit: 最大返回数量
+
+        Returns:
+            匹配的故障码列表
+        """
+        conn = self.get_connection()
+        try:
+            cursor = conn.cursor()
+            pattern = f"%{keyword}%"
+            cursor.execute("""
+                SELECT code, description, system, severity
+                FROM obd_codes
+                WHERE code LIKE ? OR description LIKE ?
+                ORDER BY code
+                LIMIT ?
+            """, (pattern, pattern, limit))
+            return [dict(row) for row in cursor.fetchall()]
+        finally:
+            conn.close()
+
+    def get_all_codes(self) -> List[Tuple[str, str]]:
+        """获取所有故障码列表（用于自动补全）"""
+        conn = self.get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute("SELECT code, description FROM obd_codes ORDER BY code")
+            return [(row["code"], row["description"]) for row in cursor.fetchall()]
+        finally:
+            conn.close()
+
+    def get_system_stats(self) -> List[Dict[str, Any]]:
+        """获取各系统故障码数量统计"""
+        conn = self.get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT system, COUNT(*) as count
+                FROM obd_codes
+                GROUP BY system
+                ORDER BY system
+            """)
+            return [dict(row) for row in cursor.fetchall()]
+        finally:
+            conn.close()
+
+    def get_total_count(self) -> int:
+        """获取故障码总数"""
+        conn = self.get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute("SELECT COUNT(*) FROM obd_codes")
+            return cursor.fetchone()[0]
+        finally:
+            conn.close()
+
+    def database_exists(self) -> bool:
+        """检查数据库文件是否存在"""
+        return os.path.exists(self.db_path)
+
+    def get_database_info(self) -> Dict[str, Any]:
+        """获取数据库信息"""
+        return {
+            "path": self.db_path,
+            "exists": self.database_exists(),
+            "total_codes": self.get_total_count() if self.database_exists() else 0,
+            "systems": self.get_system_stats() if self.database_exists() else []
+        }
+
+    def record_symptoms(self, code: str, symptom: str) -> bool:
+        """
+        为指定故障码记录一条观察到的现象
+
+        Args:
+            code: 故障码
+            symptom: 现象描述文本
+
+        Returns:
+            是否成功
+        """
+        conn = self.get_connection()
+        try:
+            cursor = conn.cursor()
+            row = cursor.execute(
+                "SELECT symptoms FROM obd_codes WHERE code = ?", (code.upper(),)
+            ).fetchone()
+            if row is None:
+                return False
+
+            existing = self.parse_json_field(row["symptoms"])
+            if symptom not in existing:
+                existing.append(symptom)
+                cursor.execute(
+                    "UPDATE obd_codes SET symptoms = ?, updated_at = CURRENT_TIMESTAMP WHERE code = ?",
+                    (json.dumps(existing, ensure_ascii=False), code.upper()),
+                )
+                conn.commit()
+            return True
+        finally:
+            conn.close()
+
+    def get_symptoms(self, code: str) -> list:
+        """获取指定故障码的已记录现象列表"""
+        conn = self.get_connection()
+        try:
+            row = conn.execute(
+                "SELECT symptoms FROM obd_codes WHERE code = ?", (code.upper(),)
+            ).fetchone()
+            if row is None:
+                return []
+            return self.parse_json_field(row["symptoms"])
+        finally:
+            conn.close()
+
+    @staticmethod
+    def parse_json_field(json_str: str) -> list:
+        """解析 JSON 字段为 Python 列表"""
+        if not json_str:
+            return []
+        try:
+            return json.loads(json_str)
+        except (json.JSONDecodeError, TypeError):
+            return []
+
+
+# 便捷函数（不需要创建实例即可使用）
+_default_db = None
+
+
+def get_db() -> DatabaseManager:
+    """获取默认数据库管理器实例"""
+    global _default_db
+    if _default_db is None:
+        _default_db = DatabaseManager()
+    return _default_db
