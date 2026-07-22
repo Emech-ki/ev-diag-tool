@@ -40,5 +40,4 @@ SEVERITY_STYLES = {
 FONT_FAMILY = "Microsoft YaHei UI"
 FONT_MONO = "Consolas"
 
-RADIUS_MD = 10
-RADIUS_LG = 16
+

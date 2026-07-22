@@ -7,8 +7,8 @@ from PyQt6.QtWidgets import (
     QLineEdit, QPushButton, QLabel, QStatusBar, QMessageBox,
     QTabWidget, QFrame
 )
+from typing import Optional
 from PyQt6.QtCore import Qt, QTimer, QThread, pyqtSignal
-from PyQt6.QtGui import QFont
 
 from src.engine.diagnostic import DiagnosticEngine, DiagnosticResult
 from src.ui.result_panel import ResultPanel
@@ -46,7 +46,7 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.engine = DiagnosticEngine()
-        self.worker = None
+        self.worker: Optional[DiagnoseWorker] = None
         self._init_ui()
         self._check_database()
         self._check_ollama()
@@ -244,8 +244,10 @@ class MainWindow(QMainWindow):
         except Exception:
             self._set_dot_status(self.db_dot, self.db_status_label, False, "DB error")
 
+    OLLAMA_CHECK_DELAY = 500
+
     def _check_ollama(self):
-        QTimer.singleShot(500, self._do_check_ollama)
+        QTimer.singleShot(self.OLLAMA_CHECK_DELAY, self._do_check_ollama)
 
     def _do_check_ollama(self):
         try:
@@ -270,6 +272,17 @@ class MainWindow(QMainWindow):
         self.status_bar.showMessage(f"正在诊断 {code}...")
 
         self.result_panel.clear()
+
+        # 断开旧 worker 信号，防止泄漏
+        if self.worker is not None:
+            try:
+                self.worker.finished.disconnect(self._on_diagnose_finished)
+                self.worker.error.disconnect(self._on_diagnose_error)
+            except TypeError:
+                pass
+            if self.worker.isRunning():
+                self.worker.quit()
+                self.worker.wait(1000)
 
         self.worker = DiagnoseWorker(
             engine=self.engine,

@@ -5,7 +5,7 @@
 PyQt6>=6.5.0              # 桌面 GUI 框架
 
 # === 数据库 ===
-aiosqlite>=0.19.0         # SQLite 异步驱动 (用于数据库操作)
+# SQLite 内置支持，无需额外包
 
 # === AI / Ollama ===
 # Ollama 通过 HTTP API 调用，不需要额外 Python 包

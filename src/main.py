@@ -94,8 +94,9 @@ def main():
         }
     """)
 
-    # 检查数据库
-    check_database()
+    # 检查数据库（不存在则退出）
+    if not check_database():
+        sys.exit(1)
 
     # 启动主窗口
     window = MainWindow()

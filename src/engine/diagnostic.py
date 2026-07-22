@@ -36,6 +36,7 @@ class DiagnosticEngine:
     """
 
     def __init__(self, knowledge_base: Optional[KnowledgeBase] = None, llm: Optional[LLMClient] = None):
+        super().__init__()
         self.kb = knowledge_base or KnowledgeBase()
         self.llm = llm or LLMClient()
 

@@ -3,24 +3,22 @@
 显示知识库信息和 AI 诊断建议
 """
 
+import html
+import re
+
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-    QTextBrowser, QGroupBox, QFrame, QScrollArea,
-    QSplitter, QLineEdit, QPushButton, QMessageBox
+    QTextBrowser, QFrame, QSplitter, QLineEdit, QPushButton, QMessageBox
 )
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QFont
 
 from src.engine.diagnostic import DiagnosticResult
 from src.engine.knowledge_base import KnowledgeBase
 from src.ui.styles import (
     PRIMARY, PRIMARY_DARK, PRIMARY_BG, CARD_BG, CARD_BORDER,
     TEXT_PRIMARY, TEXT_SECONDARY, TEXT_MUTED, BG, FONT_MONO,
-    SEVERITY_STYLES, RADIUS_MD, RADIUS_LG,
-    WARNING, WARNING_BG
+    SEVERITY_STYLES, WARNING, WARNING_BG
 )
-from src.ui.animation import fade_slide_in
-import re
 
 
 class ResultPanel(QWidget):
@@ -147,6 +145,7 @@ class ResultPanel(QWidget):
         input_row.setSpacing(8)
         self.symptom_input = QLineEdit()
         self.symptom_input.setPlaceholderText("输入你观察到的故障现象...")
+        self.symptom_input.setMaxLength(500)
         self.symptom_input.setStyleSheet(f"""
             QLineEdit {{
                 font-size: 13px; padding: 6px 10px;
@@ -252,8 +251,7 @@ class ResultPanel(QWidget):
         sev = SEVERITY_STYLES.get(severity, SEVERITY_STYLES["medium"])
 
         desc = kb.get("description", "")
-        sys_name = {"P": "动力总成", "B": "车身", "C": "底盘", "U": "网络"}
-        sys = sys_name.get(kb.get("system", "")[:1].upper(), kb.get("system", "未知"))
+        sys = self.kb.get_system_info(kb.get("system", ""))["name"]
 
         detail = kb.get("detail", "")
 
@@ -363,6 +361,7 @@ class ResultPanel(QWidget):
     def _build_ai_html(self, result: DiagnosticResult) -> str:
         """构建 AI 建议的 HTML"""
         suggestion = result.ai_suggestion or ""
+        suggestion = html.escape(suggestion)
         suggestion = re.sub(r'\*\*(.*?)\*\*', r'<strong>\1</strong>', suggestion)
         suggestion = suggestion.replace('\n', '<br>')
 

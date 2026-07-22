@@ -5,15 +5,15 @@ AI 诊断助手对话面板 (方案C)
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-    QTextBrowser, QLineEdit, QPushButton, QGroupBox,
-    QFrame, QScrollArea, QSizePolicy
+    QTextBrowser, QLineEdit, QPushButton,
+    QFrame, QTextEdit
 )
-from PyQt6.QtCore import Qt, QThread, pyqtSignal, QPropertyAnimation, QEasingCurve
-from PyQt6.QtGui import QFont
+from PyQt6.QtCore import Qt, QThread, pyqtSignal
+from PyQt6.QtGui import QTextCursor
 
 from src.engine.diagnostic import DiagnosticEngine, DiagnosticResult
 from src.ai.agent import DiagnosticAgent
-from src.ui.styles import PRIMARY, PRIMARY_DARK, PRIMARY_BG, CARD_BORDER, CARD_BG, TEXT_PRIMARY, TEXT_SECONDARY, TEXT_MUTED, BG, FONT_MONO, WARNING, WARNING_BG
+from src.ui.styles import PRIMARY, PRIMARY_DARK, PRIMARY_BG, CARD_BORDER, CARD_BG, TEXT_PRIMARY, TEXT_SECONDARY, TEXT_MUTED, BG, WARNING, WARNING_BG
 import re
 
 
@@ -53,7 +53,6 @@ class AgentChatPanel(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(8)
 
-        # 信息提示
         info_card = QFrame()
         info_card.setStyleSheet(f"background-color: {PRIMARY_BG}; border-radius: 8px;")
         info_card_layout = QHBoxLayout(info_card)
@@ -68,11 +67,10 @@ class AgentChatPanel(QWidget):
         info_card_layout.addWidget(info_label)
         layout.addWidget(info_card)
 
-        # 对话显示区
-        self.chat_browser = QTextBrowser()
-        self.chat_browser.setOpenExternalLinks(True)
-        self.chat_browser.setStyleSheet(f"""
-            QTextBrowser {{
+        self.chat_edit = QTextEdit()
+        self.chat_edit.setReadOnly(True)
+        self.chat_edit.setStyleSheet(f"""
+            QTextEdit {{
                 background-color: transparent;
                 border: none;
                 padding: 8px;
@@ -81,11 +79,10 @@ class AgentChatPanel(QWidget):
                 color: {TEXT_PRIMARY};
             }}
         """)
-        layout.addWidget(self.chat_browser, 1)
+        layout.addWidget(self.chat_edit, 1)
 
         self._append_welcome()
 
-        # 输入区
         input_card = QFrame()
         input_card.setStyleSheet(f"""
             QFrame {{
@@ -128,7 +125,6 @@ class AgentChatPanel(QWidget):
 
         layout.addWidget(input_card)
 
-        # 快捷按钮区
         quick_layout = QHBoxLayout()
         quick_layout.setSpacing(8)
 
@@ -165,8 +161,16 @@ class AgentChatPanel(QWidget):
         quick_layout.addStretch()
         layout.addLayout(quick_layout)
 
+    def _clear_display(self):
+        self.chat_edit.clear()
+
+    def _append_html(self, html: str):
+        cursor = self.chat_edit.textCursor()
+        cursor.movePosition(QTextCursor.MoveOperation.End)
+        cursor.insertHtml(html)
+        self.chat_edit.ensureCursorVisible()
+
     def _append_welcome(self):
-        """显示欢迎消息"""
         welcome = f"""
         <div style="font-family: 'Microsoft YaHei UI', sans-serif; color: {TEXT_PRIMARY};">
             <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
@@ -184,16 +188,9 @@ class AgentChatPanel(QWidget):
             </p>
         </div>
         """
-        self.chat_browser.setHtml(welcome)
+        self._append_html(welcome)
 
     def _append_message(self, role: str, content: str):
-        """
-        在对话区追加消息
-
-        Args:
-            role: "user" 或 "assistant" 或 "system"
-            content: 消息内容
-        """
         content = content.replace('\n', '<br>')
         content = re.sub(r'\*\*(.*?)\*\*', r'<strong>\1</strong>', content)
 
@@ -228,57 +225,42 @@ class AgentChatPanel(QWidget):
             </div>
             """
 
-        # 追加到现有内容
-        current = self.chat_browser.toHtml()
-        # 找到 </body> 标签，在之前插入
-        if "</body>" in current:
-            insert_pos = current.rfind("</body>")
-            new_html = current[:insert_pos] + html + current[insert_pos:]
-            self.chat_browser.setHtml(new_html)
-        else:
-            # 保底方案
-            existing = self.chat_browser.toPlainText()
-            if existing.strip():
-                self.chat_browser.append(html)
-            else:
-                self.chat_browser.setHtml(html)
-
-        # 滚动到底部
-        scrollbar = self.chat_browser.verticalScrollBar()
-        if scrollbar:
-            scrollbar.setValue(scrollbar.maximum())
+        self._append_html(html)
 
     def on_send_message(self):
-        """发送消息"""
         message = self.message_input.text().strip()
         if not message:
             return
 
-        # 显示用户消息
         self._append_message("user", message)
         self.message_input.clear()
 
-        # 禁用输入
         self._set_input_enabled(False)
 
-        # 启动后台线程
+        if self.worker is not None:
+            try:
+                self.worker.finished.disconnect(self._on_agent_response)
+                self.worker.error.disconnect(self._on_agent_error)
+            except TypeError:
+                pass
+            if self.worker.isRunning():
+                self.worker.quit()
+                self.worker.wait(1000)
+
         self.worker = AgentWorker(self.agent, message)
         self.worker.finished.connect(self._on_agent_response)
         self.worker.error.connect(self._on_agent_error)
         self.worker.start()
 
     def _on_agent_response(self, response: str):
-        """AI Agent 回复回调"""
         self._append_message("assistant", response)
         self._set_input_enabled(True)
 
     def _on_agent_error(self, error_msg: str):
-        """AI Agent 错误回调"""
         self._append_message("system", f"⚠️ 错误: {error_msg}")
         self._set_input_enabled(True)
 
     def _set_input_enabled(self, enabled: bool):
-        """启用/禁用输入"""
         self.message_input.setEnabled(enabled)
         self.send_btn.setEnabled(enabled)
         if enabled:
@@ -288,12 +270,6 @@ class AgentChatPanel(QWidget):
             self.send_btn.setText("⏳ 思考中...")
 
     def sync_diagnosis(self, result: DiagnosticResult):
-        """
-        从诊断结果页同步信息到 AI 对话
-
-        Args:
-            result: 诊断结果
-        """
         if result.has_knowledge():
             kb = result.knowledge
             msg = (
@@ -305,18 +281,17 @@ class AgentChatPanel(QWidget):
                 msg += f"• 常见原因: {causes[0]}等\n"
             msg += "请帮我分析一下，看看从哪里开始排查比较好。"
 
+            self.agent.start_diagnosis(result.code)
             self.message_input.setText(msg)
             self.on_send_message()
 
     def _on_new_diagnosis(self):
-        """开始新诊断"""
         self.agent.reset_session()
-        self.chat_browser.clear()
+        self._clear_display()
         self._append_welcome()
         self._append_message("system", "🆕 已开始新的诊断会话")
 
     def _on_show_session(self):
-        """显示当前会话信息"""
         summary = self.agent.get_session_summary()
         if summary.get("status") == "no_active_session":
             self._append_message("system", "当前没有活跃的诊断会话。输入故障码开始吧！")
@@ -331,6 +306,6 @@ class AgentChatPanel(QWidget):
             self._append_message("system", info)
 
     def _on_clear_chat(self):
-        """清空对话"""
-        self.chat_browser.clear()
+        self.agent.reset_session()
+        self._clear_display()
         self._append_welcome()

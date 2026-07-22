@@ -128,19 +128,4 @@ class KnowledgeBase:
         first_letter = system_code[0].upper() if system_code else ""
         return system_map.get(first_letter, {"name": "未知", "full_name": "未知系统", "icon": "❓"})
 
-    def format_diagnostic_steps(self, steps: List[str]) -> str:
-        """将诊断步骤格式化为可读文本"""
-        if not steps:
-            return "暂无标准诊断步骤"
 
-        formatted = []
-        for i, step in enumerate(steps, 1):
-            formatted.append(f"{i}. {step}")
-        return "\n".join(formatted)
-
-    def format_common_causes(self, causes: List[str]) -> str:
-        """将常见原因格式化为可读文本"""
-        if not causes:
-            return "暂无已知常见原因"
-
-        return "\n".join(f"• {cause}" for cause in causes)

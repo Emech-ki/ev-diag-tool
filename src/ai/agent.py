@@ -29,6 +29,9 @@ class DiagnosticSession:
     history: List[ConversationTurn] = field(default_factory=list)  # 对话历史
 
 
+CONTEXT_WINDOW_SIZE = 10
+
+
 class DiagnosticAgent:
     """
     诊断 AI Agent
@@ -36,6 +39,7 @@ class DiagnosticAgent:
     """
 
     def __init__(self, kb: Optional[KnowledgeBase] = None, llm: Optional[LLMClient] = None):
+        super().__init__()
         self.kb = kb or KnowledgeBase()
         self.llm = llm or LLMClient()
         self.session: Optional[DiagnosticSession] = None
@@ -53,17 +57,14 @@ class DiagnosticAgent:
         """
         code = code.strip().upper()
 
-        # 查询知识库
         knowledge = self.kb.lookup(code)
 
-        # 创建会话
         self.session = DiagnosticSession(
             code=code,
             vehicle_info=vehicle_info,
             context={"knowledge": knowledge}
         )
 
-        # 构建初始回复
         result = {
             "code": code,
             "knowledge": knowledge,
@@ -71,12 +72,10 @@ class DiagnosticAgent:
             "session_started": True
         }
 
-        # 记录到对话历史
-        if knowledge:
-            self.session.history.append(ConversationTurn(
-                role="assistant",
-                content=result["message"]
-            ))
+        self.session.history.append(ConversationTurn(
+            role="assistant",
+            content=result["message"]
+        ))
 
         return result
 

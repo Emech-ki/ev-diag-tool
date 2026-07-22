@@ -15,42 +15,25 @@ import os
 import sys
 from pathlib import Path
 
-# 获取项目根目录（scripts/../）
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = PROJECT_ROOT / "data"
 SEED_DIR = DATA_DIR / "seed"
 DB_PATH = DATA_DIR / "obd_codes.db"
 
+sys.path.insert(0, str(PROJECT_ROOT))
+from src.database.schema import CREATE_TABLE_OBD_CODES, CREATE_INDEX_CODE, CREATE_INDEX_SYSTEM
+
 
 def create_database():
     """创建 SQLite 数据库和表结构"""
-    # 确保 data 目录存在
     DATA_DIR.mkdir(parents=True, exist_ok=True)
 
     conn = sqlite3.connect(str(DB_PATH))
     cursor = conn.cursor()
 
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS obd_codes (
-            id          INTEGER PRIMARY KEY AUTOINCREMENT,
-            code        TEXT    NOT NULL,
-            system      TEXT    NOT NULL,
-            code_type   TEXT    DEFAULT 'generic',
-            description TEXT    NOT NULL,
-            detail      TEXT    DEFAULT '',
-            severity    TEXT    DEFAULT 'medium',
-            common_causes  TEXT    DEFAULT '[]',
-            diagnostic_steps TEXT DEFAULT '[]',
-            related_codes TEXT DEFAULT '',
-            symptoms     TEXT    DEFAULT '[]',
-            created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            updated_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
-
-    # 索引加速查询
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_code ON obd_codes(code)")
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_system ON obd_codes(system)")
+    cursor.execute(CREATE_TABLE_OBD_CODES)
+    cursor.execute(CREATE_INDEX_CODE)
+    cursor.execute(CREATE_INDEX_SYSTEM)
 
     conn.commit()
     conn.close()
@@ -80,17 +63,27 @@ def parse_json_field(value):
             return '[]'
 
 
+def _open_csv(path: Path):
+    """尝试多种编码打开 CSV 文件"""
+    for enc in ('utf-8-sig', 'gbk', 'latin-1'):
+        try:
+            return open(str(path), 'r', encoding=enc)
+        except UnicodeDecodeError:
+            continue
+    return open(str(path), 'r', encoding='utf-8-sig', errors='replace')
+
+
 def import_csv_to_db(csv_path, conn):
     """
     将单个 CSV 文件导入数据库
     返回导入的行数
     """
     if not csv_path.exists():
-        print(f"  [WARN] File not found: {csv_path}")
-        return 0
+        print(f"  [ERROR] File not found: {csv_path}")
+        sys.exit(1)
 
     count = 0
-    with open(str(csv_path), 'r', encoding='utf-8-sig') as f:
+    with _open_csv(csv_path) as f:
         reader = csv.DictReader(f)
         for row in reader:
             code = row.get('code', '').strip()

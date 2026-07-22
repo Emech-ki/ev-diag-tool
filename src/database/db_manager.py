@@ -6,19 +6,25 @@
 import sqlite3
 import json
 import os
+import sys
+import shutil
+import threading
 from pathlib import Path
 from typing import Optional, List, Dict, Any, Tuple
 
 
 class DatabaseManager:
-    """数据库管理器（单例模式）"""
+    """数据库管理器（单例模式，线程安全）"""
 
     _instance = None
+    _instance_lock = threading.Lock()
 
     def __new__(cls, db_path: Optional[str] = None):
         if cls._instance is None:
-            cls._instance = super().__new__(cls)
-            cls._instance._initialized = False
+            with cls._instance_lock:
+                if cls._instance is None:
+                    cls._instance = super().__new__(cls)
+                    cls._instance._initialized = False
         return cls._instance
 
     def __init__(self, db_path: Optional[str] = None):
@@ -29,13 +35,12 @@ class DatabaseManager:
             db_path = self._resolve_db_path()
 
         self.db_path = db_path
+        self._write_lock = threading.Lock()
         self._initialized = True
 
     @staticmethod
     def _resolve_db_path() -> str:
         """确定数据库持久化路径（支持 exe 模式）"""
-        import sys, shutil
-
         is_exe = getattr(sys, "frozen", False)
 
         if is_exe:
@@ -57,9 +62,11 @@ class DatabaseManager:
             return str(project_root / "data" / "obd_codes.db")
 
     def get_connection(self) -> sqlite3.Connection:
-        """获取数据库连接（每次调用新建连接，线程安全）"""
-        conn = sqlite3.connect(self.db_path)
+        """获取数据库连接（每次调用新建连接，WAL 模式支持并发读）"""
+        conn = sqlite3.connect(self.db_path, timeout=10)
         conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA foreign_keys=ON")
         return conn
 
     def query_by_code(self, code: str) -> Optional[Dict[str, Any]]:
@@ -157,9 +164,19 @@ class DatabaseManager:
             "systems": self.get_system_stats() if self.database_exists() else []
         }
 
+    @staticmethod
+    def _validate_symptom(symptom: str) -> str:
+        """校验并清理症状文本"""
+        if not isinstance(symptom, str):
+            return ""
+        cleaned = symptom.strip()
+        if len(cleaned) > 500:
+            cleaned = cleaned[:500]
+        return cleaned
+
     def record_symptoms(self, code: str, symptom: str) -> bool:
         """
-        为指定故障码记录一条观察到的现象
+        为指定故障码记录一条观察到的现象（线程安全）
 
         Args:
             code: 故障码
@@ -168,26 +185,35 @@ class DatabaseManager:
         Returns:
             是否成功
         """
-        conn = self.get_connection()
-        try:
-            cursor = conn.cursor()
-            row = cursor.execute(
-                "SELECT symptoms FROM obd_codes WHERE code = ?", (code.upper(),)
-            ).fetchone()
-            if row is None:
-                return False
+        symptom = self._validate_symptom(symptom)
+        if not symptom:
+            return False
 
-            existing = self.parse_json_field(row["symptoms"])
-            if symptom not in existing:
-                existing.append(symptom)
-                cursor.execute(
-                    "UPDATE obd_codes SET symptoms = ?, updated_at = CURRENT_TIMESTAMP WHERE code = ?",
-                    (json.dumps(existing, ensure_ascii=False), code.upper()),
-                )
+        with self._write_lock:
+            conn = self.get_connection()
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+                cursor = conn.cursor()
+                row = cursor.execute(
+                    "SELECT symptoms FROM obd_codes WHERE code = ?", (code.upper(),)
+                ).fetchone()
+                if row is None:
+                    return False
+
+                existing = self.parse_json_field(row["symptoms"])
+                if symptom not in existing:
+                    existing.append(symptom)
+                    cursor.execute(
+                        "UPDATE obd_codes SET symptoms = ?, updated_at = CURRENT_TIMESTAMP WHERE code = ?",
+                        (json.dumps(existing, ensure_ascii=False), code.upper()),
+                    )
                 conn.commit()
-            return True
-        finally:
-            conn.close()
+                return True
+            except Exception:
+                conn.rollback()
+                raise
+            finally:
+                conn.close()
 
     def get_symptoms(self, code: str) -> list:
         """获取指定故障码的已记录现象列表"""
@@ -213,13 +239,7 @@ class DatabaseManager:
             return []
 
 
-# 便捷函数（不需要创建实例即可使用）
-_default_db = None
-
-
+# 便捷函数
 def get_db() -> DatabaseManager:
     """获取默认数据库管理器实例"""
-    global _default_db
-    if _default_db is None:
-        _default_db = DatabaseManager()
-    return _default_db
+    return DatabaseManager()

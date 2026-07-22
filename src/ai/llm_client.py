@@ -4,8 +4,18 @@ LLM API 客户端
 """
 
 import json
+import time
+import threading
+import urllib.request
+import urllib.error
 from typing import Optional, Dict, Any, List
 from src.ai.prompt_templates import PromptTemplates
+
+TEMPERATURE = 0.7
+MAX_TOKENS = 1024
+CHECK_TIMEOUT = 3
+REQUEST_TIMEOUT = 30
+MAX_RETRIES = 2
 
 
 class LLMClient:
@@ -15,11 +25,14 @@ class LLMClient:
     """
 
     _instance = None
+    _init_lock = threading.Lock()
 
     def __new__(cls, *args, **kwargs):
         if cls._instance is None:
-            cls._instance = super().__new__(cls)
-            cls._instance._initialized = False
+            with cls._init_lock:
+                if cls._instance is None:
+                    cls._instance = super().__new__(cls)
+                    cls._instance._initialized = False
         return cls._instance
 
     def __init__(self, model_name: str = "qwen2.5:7b", base_url: str = "http://localhost:11434"):
@@ -29,6 +42,7 @@ class LLMClient:
         self.model_name = model_name
         self.base_url = base_url.rstrip("/")
         self._available = None
+        self._avail_lock = threading.Lock()
         self.templates = PromptTemplates()
         self._initialized = True
 
@@ -37,31 +51,31 @@ class LLMClient:
         if self._available is not None:
             return self._available
 
-        try:
-            import urllib.request
-            import json
+        with self._avail_lock:
+            if self._available is not None:
+                return self._available
 
-            url = f"{self.base_url}/api/tags"
-            req = urllib.request.Request(url, method="GET")
-            with urllib.request.urlopen(req, timeout=3) as response:
-                data = json.loads(response.read().decode())
-                models = [m["name"] for m in data.get("models", [])]
+            try:
+                url = f"{self.base_url}/api/tags"
+                req = urllib.request.Request(url, method="GET")
+                with urllib.request.urlopen(req, timeout=CHECK_TIMEOUT) as response:
+                    data = json.loads(response.read().decode())
+                    models = [m["name"] for m in data.get("models", [])]
 
-                # 检查指定模型是否已拉取
-                model_available = any(self.model_name in m for m in models)
-                if not model_available:
-                    print(f"  ⚠️ 模型 '{self.model_name}' 未在 Ollama 中找到")
-                    print(f"  💡 可用模型: {models[:5]}")
-                    print(f"  💡 请运行: ollama pull {self.model_name}")
+                    model_available = any(self.model_name in m for m in models)
+                    if not model_available:
+                        print(f"  ⚠️ 模型 '{self.model_name}' 未在 Ollama 中找到")
+                        print(f"  💡 可用模型: {models[:5]}")
+                        print(f"  💡 请运行: ollama pull {self.model_name}")
 
-                self._available = model_available
-                return model_available
+                    self._available = model_available
+                    return model_available
 
-        except Exception as e:
-            print(f"  ⚠️ Ollama 服务不可用: {e}")
-            print(f"  💡 请确保 Ollama 已启动: ollama serve")
-            self._available = False
-            return False
+            except Exception as e:
+                print(f"  ⚠️ Ollama 服务不可用: {e}")
+                print(f"  💡 请确保 Ollama 已启动: ollama serve")
+                self._available = False
+                return False
 
     def is_available(self) -> bool:
         """Ollama 服务是否可用"""
@@ -131,18 +145,25 @@ class LLMClient:
         except Exception as e:
             return f"⚠️ AI 回复生成失败: {str(e)}"
 
+    @staticmethod
+    def _http_request(url: str, data: bytes, headers: dict, timeout: int = REQUEST_TIMEOUT, max_retries: int = MAX_RETRIES) -> dict:
+        """带重试的 HTTP POST 请求"""
+        last_error = None
+        for attempt in range(max_retries + 1):
+            try:
+                req = urllib.request.Request(url, data=data, headers=headers, method="POST")
+                with urllib.request.urlopen(req, timeout=timeout) as response:
+                    return json.loads(response.read().decode())
+            except (urllib.error.URLError, urllib.error.HTTPError, ConnectionError, TimeoutError) as e:
+                last_error = e
+                if attempt < max_retries:
+                    wait = 2 ** attempt
+                    print(f"  ⚠️ Ollama 请求失败 (尝试 {attempt + 1}/{max_retries + 1}): {e}，{wait}秒后重试")
+                    time.sleep(wait)
+        raise last_error
+
     def _call_ollama(self, prompt: str) -> str:
-        """
-        调用 Ollama API (非流式)
-
-        Args:
-            prompt: 输入提示词
-
-        Returns:
-            模型回复文本
-        """
-        import urllib.request
-
+        """调用 Ollama API (非流式)"""
         url = f"{self.base_url}/api/generate"
         data = json.dumps({
             "model": self.model_name,
@@ -154,50 +175,30 @@ class LLMClient:
             }
         }).encode("utf-8")
 
-        req = urllib.request.Request(
-            url,
-            data=data,
+        result = self._http_request(
+            url, data,
             headers={"Content-Type": "application/json"},
-            method="POST"
         )
-
-        with urllib.request.urlopen(req, timeout=30) as response:
-            result = json.loads(response.read().decode())
-            return result.get("response", "").strip()
+        return result.get("response", "").strip()
 
     def _call_ollama_chat(self, messages: List[Dict[str, str]]) -> str:
-        """
-        调用 Ollama Chat API
-
-        Args:
-            messages: 消息列表 [{"role": "system/user/assistant", "content": "..."}]
-
-        Returns:
-            模型回复文本
-        """
-        import urllib.request
-
+        """调用 Ollama Chat API"""
         url = f"{self.base_url}/api/chat"
         data = json.dumps({
             "model": self.model_name,
             "messages": messages,
             "stream": False,
             "options": {
-                "temperature": 0.7,
-                "num_predict": 1024
+                "temperature": TEMPERATURE,
+                "num_predict": MAX_TOKENS
             }
         }).encode("utf-8")
 
-        req = urllib.request.Request(
-            url,
-            data=data,
+        result = self._http_request(
+            url, data,
             headers={"Content-Type": "application/json"},
-            method="POST"
         )
-
-        with urllib.request.urlopen(req, timeout=30) as response:
-            result = json.loads(response.read().decode())
-            return result.get("message", {}).get("content", "").strip()
+        return result.get("message", {}).get("content", "").strip()
 
 
 # 便捷函数

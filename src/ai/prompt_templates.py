@@ -127,9 +127,4 @@ class PromptTemplates:
 - 必要时建议技师查阅官方维修手册
 """
 
-    def build_search_prompt(self, keyword: str) -> str:
-        """构建搜索相关的提示词"""
-        return f"""
-请搜索与 "{keyword}" 相关的汽车故障诊断信息。
-返回最相关的故障码和诊断建议。
-"""
+

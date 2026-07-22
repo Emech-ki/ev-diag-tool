@@ -1,4 +1,13 @@
-"""动画工具：淡入上滑揭示 + 悬浮脉冲"""
+"""
+动画工具：淡入上滑揭示 + 悬浮脉冲
+
+注意：
+- fade_slide_in 使用 widget.pos() 做位移动画，如果 widget 由布局管理器管理
+  可能导致与布局位置冲突造成视觉闪烁。调用前请确保 widget 未被布局管理或
+  在动画结束后恢复布局。
+- start_pulse 和 fade_slide_in 都会替换 widget 的 QGraphicsOpacityEffect，
+  同时调用时后者会覆盖前者。
+"""
 
 from PyQt6.QtCore import QPropertyAnimation, QEasingCurve, QPoint, QTimer
 from PyQt6.QtWidgets import QWidget, QGraphicsOpacityEffect
