@@ -1,11 +1,11 @@
 """
-Main Window — v1.0.0 Original Layout
+Main Window — v1.1.0 With Streaming + Model Selector + History
 """
 
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLineEdit, QPushButton, QLabel, QStatusBar, QMessageBox,
-    QTabWidget, QFrame
+    QTabWidget, QFrame, QComboBox
 )
 from typing import Optional
 from PyQt6.QtCore import Qt, QTimer, QThread, pyqtSignal
@@ -13,6 +13,7 @@ from PyQt6.QtCore import Qt, QTimer, QThread, pyqtSignal
 from src.engine.diagnostic import DiagnosticEngine, DiagnosticResult
 from src.ui.result_panel import ResultPanel
 from src.ui.agent_chat import AgentChatPanel
+from src.ui.history_panel import HistoryPanel
 from src.ui.styles import (
     PRIMARY, PRIMARY_DARK, PRIMARY_BG,
     BG, CARD_BG, CARD_BORDER,
@@ -78,6 +79,32 @@ class MainWindow(QMainWindow):
         brand_layout.addWidget(ver)
 
         brand_layout.addStretch()
+
+        # ── Model Selector ──
+        self.model_selector = QComboBox()
+        self.model_selector.setEditable(True)
+        self.model_selector.setMinimumWidth(160)
+        self.model_selector.setMaximumHeight(30)
+        self.model_selector.setStyleSheet(f"""
+            QComboBox {{
+                font-size: 12px; padding: 4px 8px;
+                background-color: rgba(255,255,255,0.15);
+                color: white; border: 1px solid rgba(255,255,255,0.3);
+                border-radius: 6px;
+            }}
+            QComboBox:hover {{ background-color: rgba(255,255,255,0.25); }}
+            QComboBox::drop-down {{
+                border: none; width: 20px;
+            }}
+            QComboBox QAbstractItemView {{
+                background-color: white; color: {TEXT_PRIMARY};
+                border: 1px solid {CARD_BORDER}; selection-background-color: {PRIMARY_BG};
+            }}
+        """)
+        self.model_selector.currentTextChanged.connect(self._on_model_changed)
+        brand_layout.addWidget(self.model_selector)
+
+        brand_layout.addSpacing(14)
 
         self.db_dot = QLabel("●")
         self.db_dot.setStyleSheet("color: #9AA0A6; font-size: 12px;")
@@ -212,6 +239,9 @@ class MainWindow(QMainWindow):
         self.agent_panel = AgentChatPanel(self.engine)
         self.tab_widget.addTab(self.agent_panel, "AI 助手")
 
+        self.history_panel = HistoryPanel(self.engine.db)
+        self.tab_widget.addTab(self.history_panel, "历史记录")
+
         content_layout.addWidget(self.tab_widget, 1)
         main_layout.addWidget(content, 1)
 
@@ -254,10 +284,38 @@ class MainWindow(QMainWindow):
             llm = self.engine.llm
             if llm.is_available():
                 self._set_dot_status(self.ollama_dot, self.ollama_status_label, True, "AI Ready")
+                self._init_model_selector()
             else:
                 self._set_dot_status(self.ollama_dot, self.ollama_status_label, False, "AI offline")
         except Exception:
             self._set_dot_status(self.ollama_dot, self.ollama_status_label, False, "AI offline")
+
+    def _init_model_selector(self):
+        """初始化模型选择器"""
+        try:
+            models = self.engine.llm.get_available_models()
+            current = self.engine.llm.model_name
+
+            self.model_selector.blockSignals(True)
+            self.model_selector.clear()
+            self.model_selector.addItems(models)
+
+            idx = self.model_selector.findText(current)
+            if idx >= 0:
+                self.model_selector.setCurrentIndex(idx)
+            else:
+                self.model_selector.setEditText(current)
+
+            self.model_selector.blockSignals(False)
+        except Exception:
+            pass
+
+    def _on_model_changed(self, model_name: str):
+        """模型切换回调"""
+        if not model_name:
+            return
+        self.engine.llm.set_model(model_name)
+        self.status_bar.showMessage(f"已切换模型: {model_name}")
 
     # ── Diagnosis ──
 
@@ -301,11 +359,30 @@ class MainWindow(QMainWindow):
 
         self.result_panel.show_result(result)
 
+        # 保存诊断历史
+        self._save_diagnosis_history(result)
+
         if result.has_ai() or result.has_knowledge():
             self.agent_panel.sync_diagnosis(result)
 
         if result.has_knowledge():
             self.tab_widget.setCurrentIndex(0)
+
+    def _save_diagnosis_history(self, result: DiagnosticResult):
+        """保存诊断记录到历史"""
+        try:
+            vehicle = self.vehicle_input.text().strip()
+            symptom = self.symptom_input.text().strip()
+            self.engine.db.save_history(
+                code=result.code,
+                vehicle_info=vehicle,
+                symptoms=symptom,
+                knowledge_found=result.has_knowledge(),
+                ai_suggestion=result.ai_suggestion or ""
+            )
+            self.history_panel.refresh()
+        except Exception:
+            pass
 
     def _on_diagnose_error(self, error_msg: str):
         self.search_btn.setEnabled(True)

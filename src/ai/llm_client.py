@@ -82,6 +82,22 @@ class LLMClient:
         """Ollama 服务是否可用"""
         return self._check_availability()
 
+    def get_available_models(self) -> List[str]:
+        """获取 Ollama 已安装的模型列表"""
+        try:
+            url = f"{self.base_url}/api/tags"
+            req = urllib.request.Request(url, method="GET")
+            with urllib.request.urlopen(req, timeout=CHECK_TIMEOUT) as response:
+                data = json.loads(response.read().decode())
+                return [m["name"] for m in data.get("models", [])]
+        except Exception:
+            return []
+
+    def set_model(self, model_name: str):
+        """切换模型"""
+        self.model_name = model_name
+        self._available = None  # 重置可用性缓存
+
     def get_diagnostic_suggestion(
         self,
         code: str,
@@ -146,6 +162,32 @@ class LLMClient:
         except Exception as e:
             return f"⚠️ AI 回复生成失败: {str(e)}"
 
+    def chat_stream(self, message: str, context: Optional[List[Dict[str, str]]] = None):
+        """
+        与 AI Agent 对话（流式响应）
+
+        Args:
+            message: 用户消息
+            context: 对话上下文历史
+
+        Yields:
+            每个 token 文本
+        """
+        if not self._check_availability():
+            yield "⚠️ Ollama 服务未启动"
+            return
+
+        messages = list(context) if context else []
+        messages.append({"role": "user", "content": message})
+
+        system_prompt = self.templates.get_agent_system_prompt()
+        messages.insert(0, {"role": "system", "content": system_prompt})
+
+        try:
+            yield from self._call_ollama_chat_stream(messages)
+        except Exception as e:
+            yield f"⚠️ AI 回复生成失败: {str(e)}"
+
     @staticmethod
     def _http_request(url: str, data: bytes, headers: dict, timeout: int = REQUEST_TIMEOUT, max_retries: int = MAX_RETRIES) -> dict:
         """带重试的 HTTP POST 请求"""
@@ -200,6 +242,34 @@ class LLMClient:
             headers={"Content-Type": "application/json"},
         )
         return result.get("message", {}).get("content", "").strip()
+
+    def _call_ollama_chat_stream(self, messages: List[Dict[str, str]]):
+        """调用 Ollama Chat API（流式）"""
+        url = f"{self.base_url}/api/chat"
+        data = json.dumps({
+            "model": self.model_name,
+            "messages": messages,
+            "stream": True,
+            "options": {
+                "temperature": TEMPERATURE,
+                "num_predict": MAX_TOKENS
+            }
+        }).encode("utf-8")
+
+        req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"}, method="POST")
+        with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT) as response:
+            for line in response:
+                if not line:
+                    continue
+                try:
+                    chunk = json.loads(line.decode("utf-8"))
+                    token = chunk.get("message", {}).get("content", "")
+                    if token:
+                        yield token
+                    if chunk.get("done", False):
+                        break
+                except json.JSONDecodeError:
+                    continue
 
 
 # 便捷函数

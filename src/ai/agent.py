@@ -123,6 +123,47 @@ class DiagnosticAgent:
             self.session.history.append(ConversationTurn(role="assistant", content=error_msg))
             return error_msg
 
+    def chat_stream(self, message: str):
+        """
+        与 Agent 对话（流式响应）
+
+        Args:
+            message: 技师的消息
+
+        Yields:
+            每个 token 文本
+        """
+        if not self.session:
+            yield "请先输入故障码开始诊断。"
+            return
+
+        self.session.history.append(ConversationTurn(role="user", content=message))
+
+        try:
+            context = [
+                {"role": turn.role, "content": turn.content}
+                for turn in self.session.history[-10:]
+            ]
+
+            context_info = f"\n[当前诊断上下文]\n故障码: {self.session.code}\n"
+            if self.session.vehicle_info:
+                context_info += f"车型: {self.session.vehicle_info}\n"
+
+            full_response = []
+            for token in self.llm.chat_stream(
+                message=f"{context_info}\n\n技师提问: {message}",
+                context=context
+            ):
+                full_response.append(token)
+                yield token
+
+            self.session.history.append(ConversationTurn(role="assistant", content="".join(full_response)))
+
+        except Exception as e:
+            error_msg = f"抱歉，AI 回复时遇到问题: {str(e)}。请重试。"
+            self.session.history.append(ConversationTurn(role="assistant", content=error_msg))
+            yield error_msg
+
     def reset_session(self):
         """重置当前诊断会话"""
         self.session = None

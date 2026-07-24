@@ -26,9 +26,23 @@ CREATE TABLE IF NOT EXISTS obd_codes (
 )
 """
 
+CREATE_TABLE_HISTORY = """
+CREATE TABLE IF NOT EXISTS diagnostic_history (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    code             TEXT    NOT NULL,
+    vehicle_info     TEXT    DEFAULT '',
+    symptoms         TEXT    DEFAULT '',
+    knowledge_found  INTEGER DEFAULT 0,
+    ai_suggestion    TEXT    DEFAULT '',
+    created_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+)
+"""
+
 # 索引
 CREATE_INDEX_CODE = "CREATE INDEX IF NOT EXISTS idx_code ON obd_codes(code)"
 CREATE_INDEX_SYSTEM = "CREATE INDEX IF NOT EXISTS idx_system ON obd_codes(system)"
+CREATE_INDEX_HISTORY_CODE = "CREATE INDEX IF NOT EXISTS idx_history_code ON diagnostic_history(code)"
+CREATE_INDEX_HISTORY_TIME = "CREATE INDEX IF NOT EXISTS idx_history_time ON diagnostic_history(created_at)"
 
 # 查询语句
 SQL_QUERY_BY_CODE = "SELECT * FROM obd_codes WHERE code = ?"

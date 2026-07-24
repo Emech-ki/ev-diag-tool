@@ -21,7 +21,10 @@ SEED_DIR = DATA_DIR / "seed"
 DB_PATH = DATA_DIR / "obd_codes.db"
 
 sys.path.insert(0, str(PROJECT_ROOT))
-from src.database.schema import CREATE_TABLE_OBD_CODES, CREATE_INDEX_CODE, CREATE_INDEX_SYSTEM
+from src.database.schema import (
+    CREATE_TABLE_OBD_CODES, CREATE_INDEX_CODE, CREATE_INDEX_SYSTEM,
+    CREATE_TABLE_HISTORY, CREATE_INDEX_HISTORY_CODE, CREATE_INDEX_HISTORY_TIME
+)
 
 
 def create_database():
@@ -34,6 +37,10 @@ def create_database():
     cursor.execute(CREATE_TABLE_OBD_CODES)
     cursor.execute(CREATE_INDEX_CODE)
     cursor.execute(CREATE_INDEX_SYSTEM)
+
+    cursor.execute(CREATE_TABLE_HISTORY)
+    cursor.execute(CREATE_INDEX_HISTORY_CODE)
+    cursor.execute(CREATE_INDEX_HISTORY_TIME)
 
     conn.commit()
     conn.close()

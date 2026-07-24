@@ -233,6 +233,76 @@ class DatabaseManager:
         finally:
             conn.close()
 
+    def save_history(self, code: str, vehicle_info: str = "", symptoms: str = "",
+                     knowledge_found: bool = False, ai_suggestion: str = "") -> bool:
+        """保存诊断记录"""
+        with self._write_lock:
+            conn = self.get_connection()
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+                cursor = conn.cursor()
+                cursor.execute("""
+                    INSERT INTO diagnostic_history
+                        (code, vehicle_info, symptoms, knowledge_found, ai_suggestion)
+                    VALUES (?, ?, ?, ?, ?)
+                """, (code, vehicle_info, symptoms, 1 if knowledge_found else 0, ai_suggestion))
+                conn.commit()
+                return True
+            except Exception:
+                conn.rollback()
+                raise
+            finally:
+                conn.close()
+
+    def get_history(self, limit: int = 50) -> List[Dict[str, Any]]:
+        """获取诊断历史记录"""
+        conn = self.get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT id, code, vehicle_info, symptoms, knowledge_found,
+                       ai_suggestion, created_at
+                FROM diagnostic_history
+                ORDER BY created_at DESC
+                LIMIT ?
+            """, (limit,))
+            return [dict(row) for row in cursor.fetchall()]
+        finally:
+            conn.close()
+
+    def search_history(self, keyword: str, limit: int = 50) -> List[Dict[str, Any]]:
+        """搜索诊断历史"""
+        conn = self.get_connection()
+        try:
+            cursor = conn.cursor()
+            pattern = f"%{keyword}%"
+            cursor.execute("""
+                SELECT id, code, vehicle_info, symptoms, knowledge_found,
+                       ai_suggestion, created_at
+                FROM diagnostic_history
+                WHERE code LIKE ? OR vehicle_info LIKE ? OR symptoms LIKE ?
+                ORDER BY created_at DESC
+                LIMIT ?
+            """, (pattern, pattern, pattern, limit))
+            return [dict(row) for row in cursor.fetchall()]
+        finally:
+            conn.close()
+
+    def clear_history(self) -> bool:
+        """清空诊断历史"""
+        with self._write_lock:
+            conn = self.get_connection()
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+                conn.execute("DELETE FROM diagnostic_history")
+                conn.commit()
+                return True
+            except Exception:
+                conn.rollback()
+                raise
+            finally:
+                conn.close()
+
     @staticmethod
     def parse_json_field(json_str: str) -> list:
         """解析 JSON 字段为 Python 列表"""
