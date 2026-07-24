@@ -11,6 +11,7 @@ import shutil
 import threading
 from pathlib import Path
 from typing import Optional, List, Dict, Any, Tuple
+from src.config import DB_PATH as CONFIG_DB_PATH
 
 
 class DatabaseManager:
@@ -41,6 +42,10 @@ class DatabaseManager:
     @staticmethod
     def _resolve_db_path() -> str:
         """确定数据库持久化路径（支持 exe 模式）"""
+        # 如果配置中指定了路径，优先使用
+        if CONFIG_DB_PATH:
+            return CONFIG_DB_PATH
+
         is_exe = getattr(sys, "frozen", False)
 
         if is_exe:

@@ -11,6 +11,9 @@ PyQt6>=6.5.0              # 桌面 GUI 框架
 # Ollama 通过 HTTP API 调用，不需要额外 Python 包
 # 但需要安装 Ollama 桌面端: https://ollama.com/
 
+# === 配置 ===
+python-dotenv>=1.0.0      # .env 配置文件读取
+
 # === 工具 ===
 pyinstaller>=6.0.0        # 打包 exe (可选)
 

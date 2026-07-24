@@ -9,13 +9,14 @@ import threading
 import urllib.request
 import urllib.error
 from typing import Optional, Dict, Any, List
+from src.config import OLLAMA_BASE_URL, OLLAMA_MODEL_NAME
 from src.ai.prompt_templates import PromptTemplates
 
 TEMPERATURE = 0.7
 MAX_TOKENS = 1024
 CHECK_TIMEOUT = 3
-REQUEST_TIMEOUT = 30
-MAX_RETRIES = 2
+REQUEST_TIMEOUT = 90
+MAX_RETRIES = 3
 
 
 class LLMClient:
@@ -35,12 +36,12 @@ class LLMClient:
                     cls._instance._initialized = False
         return cls._instance
 
-    def __init__(self, model_name: str = "qwen2.5:7b", base_url: str = "http://localhost:11434"):
+    def __init__(self, model_name: str = None, base_url: str = None):
         if self._initialized:
             return
 
-        self.model_name = model_name
-        self.base_url = base_url.rstrip("/")
+        self.model_name = model_name or OLLAMA_MODEL_NAME
+        self.base_url = (base_url or OLLAMA_BASE_URL).rstrip("/")
         self._available = None
         self._avail_lock = threading.Lock()
         self.templates = PromptTemplates()
