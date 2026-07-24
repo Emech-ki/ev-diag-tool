@@ -2,49 +2,48 @@
 
 ## 项目信息
 - **远程仓库:** https://github.com/Emech-ki/ev-diag-tool
-- **当前版本:** v1.1.0 — 流式响应 + 模型切换 + 历史记录
+- **当前版本:** v1.2.0 — 流式诊断 + 相关码跳转 + bug 修复
 - **技术栈:** Python 3.14 + PyQt6 + SQLite + Ollama API
 - **入口:** `python src/main.py`
 - **测试:** `python -m pytest tests/ -v`
 
 ## 最近完成的工作（本次会话）
 
-### 1. 阶段一遗留修复
-- ✅ `.env` 配置集成 — 新建 `src/config.py`，统一管理配置
-- ✅ Ollama 超时修复 — `REQUEST_TIMEOUT` 30s → 90s，`MAX_RETRIES` 2 → 3
-- ✅ `b_codes.csv` 数据修复 — B1100/B1101 症状从 P 码改为车身系统正确症状
+### 1. Code Review 修复 (8 issues, 已全部修复)
+- 🔴 **HIGH (2):**
+  - `main_window.py:319` — 添加 `LLMClient.reset_availability()` 方法，替换外部直接改 `_available`
+  - `main.py:99` — `check_database()` 返回 False 时 `sys.exit(1)`
+- 🟡 **MEDIUM (6):**
+  - `result_panel.py:256` — 删除未使用的 `detail` 重复赋值
+  - `main.py:28` — `check_database()` 改用 `DatabaseManager._resolve_db_path()` 统一路径
+  - `db_manager.py:134/300` — `search_codes()` 和 `search_history()` 中 LIKE 通配符 `%` `_` 加 `ESCAPE '\'` 转义
+  - `main_window.py:386` — `except: pass` 改为显示错误信息
+  - `llm_client.py:289` — `create_llm_client()` 默认模型名从 config 读取
+  - `scripts/seed_db.py:135` — 新增 `-f/--force` 参数，支持 `argparse`
 
-### 2. 阶段二增强
-- ✅ **流式响应** — AI 回复逐字显示（打字机效果）
-  - `llm_client.py` 新增 `chat_stream()` 方法
-  - `agent.py` 新增 `chat_stream()` 方法
-  - `agent_chat.py` 使用 `AgentStreamWorker` 实现实时显示
-- ✅ **模型切换 UI** — 品牌栏可编辑下拉框
-  - `llm_client.py` 新增 `get_available_models()` + `set_model()`
-  - `main_window.py` 添加 QComboBox，自动列出已安装模型
-- ✅ **诊断历史记录** — 新增"历史记录"Tab
-  - `schema.py` 新增 `diagnostic_history` 表
-  - `db_manager.py` 新增 `save_history()` / `get_history()` / `search_history()` / `clear_history()`
-  - `history_panel.py` 新建，支持搜索和清空
-  - 每次诊断自动保存记录
+### 2. 历史记录时间修复
+- `db_manager.py:save_history()` — 改用 `datetime.now()` 显式写入本地时间，替代 SQLite 的 UTC `CURRENT_TIMESTAMP`
 
-### 3. 测试
-- ✅ 41 个单元测试全部通过
-  - `tests/test_database.py` — 19 个数据库测试
-  - `tests/test_engine.py` — 12 个引擎测试
-  - `tests/test_ai.py` — 10 个 AI 测试
+### 3. 流式诊断 (改进了诊断 UX)
+- `llm_client.py` — 新增 `_call_ollama_stream()` + `get_diagnostic_suggestion_stream()`
+- `main_window.py` — `DiagnoseWorker` 拆为两阶段: KB 查询 → `kb_ready` 信号 → AI 流式 → `ai_token`/`ai_finished` 信号
+- `result_panel.py` — 新增 `show_kb_result()`、`append_ai_text()`、`finalize_ai_suggestion()` 分步渲染
+- 效果: 点击"诊断"后 **<0.1s 显示知识库结果**，AI 建议逐 token 追加
 
-### 4. Code Review 修复
-- ✅ 动态 import 改为顶部导入
-- ✅ 流式请求增加重试机制
-- ✅ 流式 UI 性能优化（不重写整个 HTML）
-- ✅ 模型切换增加验证提示
+### 4. 相关故障码修复 + 点击跳转
+- `kb.get("related_codes")` JSON 字符串未解析为列表的 bug 修复
+- `kb.get("common_causes")` / `kb.get("diagnostic_steps")` JSON 字符串同样修复
+- 相关码 chip 间距修复: `QTextBrowser` 不支持 `display:inline-block`，改用 `" ".join` 加空格
+- 新增点击跳转: `<a href="dtc://CODE">` → `_on_related_code_clicked` → 同步 `kb.lookup()` → `show_lookup_result()` → 切 tab
+
+### 5. 未完成
+- 相关码点击后的完整诊断联动（含 AI）尚未处理
 
 ## 已知未完成项
-1. **打包 exe** — 需要更新 `EV-Diag-Tool_v1.0.0.spec` 文件以包含新增文件
-2. **流式 UI 完善** — 当前流式完成后会用 HTML 替换，可进一步优化格式化
-3. **诊断历史导出** — 计划中的功能，暂未实现
-4. **Git 系统 PATH** — 当前需通过 `$env:PATH` 临时添加
+1. **相关码点击后完整诊断联动** — 当前只做同步 KB 查询，需要决定是否触发 AI 诊断
+2. **打包 exe** — 需要更新 `EV-Diag-Tool_v1.0.0.spec` 文件以包含新增文件
+3. **诊断历史导出** — 支持导出为 PDF/HTML
+4. **"Streaming response failed" bug** — 排查中，待确认根因
 
 ## 项目结构
 
@@ -136,8 +135,8 @@ a3e948b Fix: resolve 42 code review issues (MEDIUM+LOW) + agent session bug
 
 ## 下一步建议
 
-1. **打包 exe** — 更新 PyInstaller spec 文件，打包新功能
-2. **流式诊断建议** — 当前只在 Agent 对话中使用流式，诊断结果页面的 AI 建议也可以改为流式
+1. **相关码点击后完整诊断** — 点击相关码时是否触发完整诊断（含AI流式）
+2. **打包 exe** — 更新 PyInstaller spec 文件，打包新功能
 3. **多语言支持** — 当前只支持中文
 4. **诊断报告导出** — 支持导出为 PDF/HTML
 5. **离线模式** — 支持不联网时只使用知识库查询

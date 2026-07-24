@@ -24,8 +24,9 @@ from src.ui.main_window import MainWindow
 
 
 def check_database():
-    """检查数据库是否存在"""
-    db_path = os.path.join(PROJECT_ROOT, "data", "obd_codes.db")
+    """检查数据库是否存在，使用 config 中的统一路径解析"""
+    from src.database.db_manager import DatabaseManager
+    db_path = DatabaseManager._resolve_db_path()
     if not os.path.exists(db_path):
         QMessageBox.warning(
             None,
@@ -95,8 +96,9 @@ def main():
         }
     """)
 
-    # 检查数据库
-    check_database()
+    # 检查数据库，不存在则退出
+    if not check_database():
+        sys.exit(1)
 
     # 启动主窗口
     window = MainWindow()

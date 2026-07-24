@@ -93,10 +93,14 @@ class LLMClient:
         except Exception:
             return []
 
+    def reset_availability(self):
+        """重置可用性缓存，下次调用 is_available() 时重新检查"""
+        self._available = None
+
     def set_model(self, model_name: str):
         """切换模型"""
         self.model_name = model_name
-        self._available = None  # 重置可用性缓存
+        self.reset_availability()
 
     def get_diagnostic_suggestion(
         self,
@@ -134,6 +138,41 @@ class LLMClient:
             return response
         except Exception as e:
             return f"⚠️ AI 诊断生成失败: {str(e)}"
+
+    def get_diagnostic_suggestion_stream(
+        self,
+        code: str,
+        knowledge: Optional[Dict[str, Any]] = None,
+        vehicle_info: str = "",
+        additional_info: str = ""
+    ):
+        """
+        获取 AI 诊断建议（流式）
+
+        Args:
+            code: 故障码
+            knowledge: 知识库查询结果（可为 None）
+            vehicle_info: 车型信息
+            additional_info: 附加描述
+
+        Yields:
+            每个 token 文本
+        """
+        if not self._check_availability():
+            yield "⚠️ Ollama 服务未启动，请检查后重试"
+            return
+
+        prompt = self.templates.build_diagnostic_prompt(
+            code=code,
+            knowledge=knowledge,
+            vehicle_info=vehicle_info,
+            additional_info=additional_info
+        )
+
+        try:
+            yield from self._call_ollama_stream(prompt)
+        except Exception as e:
+            yield f"⚠️ AI 诊断生成失败: {str(e)}"
 
     def chat(self, message: str, context: Optional[List[Dict[str, str]]] = None) -> str:
         """
@@ -224,6 +263,47 @@ class LLMClient:
         )
         return result.get("response", "").strip()
 
+    def _call_ollama_stream(self, prompt: str):
+        """调用 Ollama API（流式生成）"""
+        url = f"{self.base_url}/api/generate"
+        data = json.dumps({
+            "model": self.model_name,
+            "prompt": prompt,
+            "stream": True,
+            "options": {
+                "temperature": 0.7,
+                "num_predict": 1024
+            }
+        }).encode("utf-8")
+
+        last_error = None
+        for attempt in range(MAX_RETRIES + 1):
+            try:
+                req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"}, method="POST")
+                with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT) as response:
+                    for line in response:
+                        if not line:
+                            continue
+                        try:
+                            chunk = json.loads(line.decode("utf-8"))
+                            token = chunk.get("response", "")
+                            if token:
+                                yield token
+                            if chunk.get("done", False):
+                                break
+                        except json.JSONDecodeError:
+                            continue
+                return
+            except (urllib.error.URLError, urllib.error.HTTPError, ConnectionError, TimeoutError) as e:
+                last_error = e
+                if attempt < MAX_RETRIES:
+                    wait = 2 ** attempt
+                    print(f"  ⚠️ Ollama 流式请求失败 (尝试 {attempt + 1}/{MAX_RETRIES + 1}): {e}，{wait}秒后重试")
+                    time.sleep(wait)
+                    yield f"\n\n⚠️ 连接中断，正在重试 ({attempt + 1}/{MAX_RETRIES})...\n"
+                else:
+                    raise last_error
+
     def _call_ollama_chat(self, messages: List[Dict[str, str]]) -> str:
         """调用 Ollama Chat API"""
         url = f"{self.base_url}/api/chat"
@@ -286,6 +366,6 @@ class LLMClient:
 
 
 # 便捷函数
-def create_llm_client(model_name: str = "qwen2.5:7b") -> LLMClient:
-    """创建 LLM 客户端实例"""
-    return LLMClient(model_name=model_name)
+def create_llm_client(model_name: str = None) -> LLMClient:
+    """创建 LLM 客户端实例，默认从 config 读取模型名"""
+    return LLMClient(model_name=model_name or OLLAMA_MODEL_NAME)

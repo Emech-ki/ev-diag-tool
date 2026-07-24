@@ -3,11 +3,11 @@
 将 CSV 种子数据导入 SQLite 数据库
 
 用法:
-    python scripts/seed_db.py
-
-如果数据库已存在，可以选择覆盖或跳过
+    python scripts/seed_db.py        # 交互模式（数据库存在时询问）
+    python scripts/seed_db.py -f     # 强制覆盖（不询问）
 """
 
+import argparse
 import csv
 import json
 import sqlite3
@@ -126,18 +126,28 @@ def import_csv_to_db(csv_path, conn):
 
 
 def main():
+    parser = argparse.ArgumentParser(description="EV-Diag-Tool 数据库初始化工具")
+    parser.add_argument("-f", "--force", action="store_true",
+                        help="强制覆盖已有数据库（不询问）")
+    args = parser.parse_args()
+
     print("=" * 50)
     print("[TOOL] EV-Diag-Tool Database Initializer")
     print("=" * 50)
 
     # 检查是否需要覆盖
     if DB_PATH.exists():
-        response = input(f"[WARN] Database exists: {DB_PATH}\n   Overwrite? (y/N): ").strip().lower()
-        if response != 'y':
-            print("[CANCEL] Operation cancelled")
-            return
-        DB_PATH.unlink()
-        print("[DEL] Old database deleted")
+        if args.force:
+            print(f"[WARN] Database exists: {DB_PATH} (force mode — 直接覆盖)")
+            DB_PATH.unlink()
+            print("[DEL] Old database deleted")
+        else:
+            response = input(f"[WARN] Database exists: {DB_PATH}\n   Overwrite? (y/N): ").strip().lower()
+            if response != 'y':
+                print("[CANCEL] Operation cancelled")
+                return
+            DB_PATH.unlink()
+            print("[DEL] Old database deleted")
 
     print("\n[CREATE] Creating database structure...")
     create_database()

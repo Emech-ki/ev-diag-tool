@@ -4,13 +4,15 @@
 """
 
 import html
+import json
 import re
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QTextBrowser, QFrame, QSplitter, QLineEdit, QPushButton, QMessageBox
 )
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtGui import QTextCursor
 
 from src.engine.diagnostic import DiagnosticResult
 from src.engine.knowledge_base import KnowledgeBase
@@ -24,11 +26,16 @@ from src.ui.styles import (
 class ResultPanel(QWidget):
     """诊断结果展示面板"""
 
+    diagnose_requested = pyqtSignal(str)
+
     def __init__(self):
         super().__init__()
         self.kb = KnowledgeBase()
         self._current_code = None
+        self._ai_stream_started = False
+        self._ai_stream_content = ""
         self._init_ui()
+        self._init_connections()
 
     def _init_ui(self):
         layout = QVBoxLayout(self)
@@ -50,7 +57,7 @@ class ResultPanel(QWidget):
         knowledge_layout.setSpacing(8)
 
         self.knowledge_browser = QTextBrowser()
-        self.knowledge_browser.setOpenExternalLinks(True)
+        self.knowledge_browser.setOpenExternalLinks(False)
         self.knowledge_browser.setStyleSheet(f"""
             QTextBrowser {{
                 background-color: transparent;
@@ -175,6 +182,17 @@ class ResultPanel(QWidget):
         symptom_layout.addLayout(input_row)
         layout.addWidget(symptom_card)
 
+    def _init_connections(self):
+        """初始化信号连接"""
+        self.knowledge_browser.anchorClicked.connect(self._on_anchor_clicked)
+
+    def _on_anchor_clicked(self, url):
+        """处理知识库中的可点击链接（如相关故障码）"""
+        if url.scheme() == "dtc":
+            code = url.path().strip("/")
+            if code:
+                self.diagnose_requested.emit(code)
+
     def _on_save_symptom(self):
         """保存技师记录的现象"""
         text = self.symptom_input.text().strip()
@@ -213,6 +231,8 @@ class ResultPanel(QWidget):
         self.knowledge_browser.clear()
         self.ai_browser.clear()
         self.ai_status_label.clear()
+        self._ai_stream_started = False
+        self._ai_stream_content = ""
 
     def show_result(self, result: DiagnosticResult):
         """显示诊断结果"""
@@ -234,15 +254,107 @@ class ResultPanel(QWidget):
             self.ai_status_label.setText("✅ AI 诊断建议已生成（仅供参考）")
             self.ai_status_label.setStyleSheet("font-size: 12px; color: #4CAF50; padding: 4px;")
         else:
-            self.ai_browser.setHtml("""
-                <div style="text-align: center; color: #999; margin-top: 40px;">
-                    <p style="font-size: 24px;">🤖</p>
-                    <p>AI 诊断暂不可用</p>
-                    <p style="font-size: 12px;">请确保 Ollama 已启动且模型已加载</p>
+            self._show_ai_unavailable()
+
+    def show_kb_result(self, result: DiagnosticResult):
+        """仅显示知识库结果，AI 区域显示加载/不可用状态"""
+        self.clear()
+
+        self._current_code = result.code if result.has_knowledge() else None
+        self._refresh_symptoms_display()
+
+        if result.has_knowledge():
+            html = self._build_knowledge_html(result)
+        else:
+            html = self._build_not_found_html(result)
+
+        self.knowledge_browser.setHtml(html)
+
+        if result.ai_available:
+            self._show_ai_loading()
+        else:
+            self._show_ai_unavailable()
+
+    def show_lookup_result(self, result: DiagnosticResult):
+        """快速查询展示（用于相关码跳转），只显示知识库，不显示 AI 状态"""
+        self.clear()
+
+        self._current_code = result.code if result.has_knowledge() else None
+        self._refresh_symptoms_display()
+
+        if result.has_knowledge():
+            html = self._build_knowledge_html(result)
+        else:
+            html = self._build_not_found_html(result)
+
+        self.knowledge_browser.setHtml(html)
+
+    def append_ai_text(self, token: str):
+        """追加 AI 流式 token 到 AI 浏览器"""
+        if not self._ai_stream_started:
+            self.ai_browser.clear()
+            self._ai_stream_started = True
+            self._ai_stream_content = ""
+
+        self._ai_stream_content += token
+        escaped = token.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+        escaped = re.sub(r'\*\*(.*?)\*\*', r'<strong>\1</strong>', escaped)
+        escaped = escaped.replace('\n', '<br>')
+
+        cursor = self.ai_browser.textCursor()
+        cursor.movePosition(QTextCursor.MoveOperation.End)
+        cursor.insertHtml(escaped)
+        self.ai_browser.ensureCursorVisible()
+
+    def finalize_ai_suggestion(self, code: str, full_text: str, timestamp: str = ""):
+        """AI 流式完成，重建完整格式化的 HTML"""
+        if not full_text:
+            return
+
+        suggestion = html.escape(full_text)
+        suggestion = re.sub(r'\*\*(.*?)\*\*', r'<strong>\1</strong>', suggestion)
+        suggestion = suggestion.replace('\n', '<br>')
+
+        self.ai_browser.setHtml(f"""
+            <div style="font-family: 'Microsoft YaHei UI', sans-serif;">
+                <div style="color: {TEXT_SECONDARY}; font-size: 12px; margin-bottom: 12px;">
+                    基于 {code} + 车型/症状信息生成
+                    <span style="float: right;">{timestamp}</span>
                 </div>
-            """)
-            self.ai_status_label.setText("⚠️ AI 服务未连接")
-            self.ai_status_label.setStyleSheet("font-size: 12px; color: #FF9800; padding: 4px;")
+                <div style="color: {TEXT_PRIMARY}; line-height: 1.7; font-size: 14px;">
+                    {suggestion}
+                </div>
+                <div style="margin-top: 16px; padding: 10px 14px; background-color: {WARNING_BG};
+                            border-radius: 6px; font-size: 12px; color: {WARNING};">
+                    AI 建议仅供参考，请结合实际情况和专业判断做出维修决策。
+                </div>
+            </div>
+        """)
+        self.ai_status_label.setText("✅ AI 诊断建议已生成（仅供参考）")
+        self.ai_status_label.setStyleSheet("font-size: 12px; color: #4CAF50; padding: 4px;")
+
+    def _show_ai_loading(self):
+        """显示 AI 生成中占位"""
+        self.ai_browser.setHtml("""
+            <div style="text-align: center; color: #999; margin-top: 40px;">
+                <p style="font-size: 24px;">⏳</p>
+                <p>AI 诊断建议生成中...</p>
+            </div>
+        """)
+        self.ai_status_label.setText("⏳ 生成中...")
+        self.ai_status_label.setStyleSheet("font-size: 12px; color: #1976D2; padding: 4px;")
+
+    def _show_ai_unavailable(self):
+        """显示 AI 不可用"""
+        self.ai_browser.setHtml("""
+            <div style="text-align: center; color: #999; margin-top: 40px;">
+                <p style="font-size: 24px;">🤖</p>
+                <p>AI 诊断暂不可用</p>
+                <p style="font-size: 12px;">请确保 Ollama 已启动且模型已加载</p>
+            </div>
+        """)
+        self.ai_status_label.setText("⚠️ AI 服务未连接")
+        self.ai_status_label.setStyleSheet("font-size: 12px; color: #FF9800; padding: 4px;")
 
     def _build_knowledge_html(self, result: DiagnosticResult) -> str:
         """构建知识库信息的 HTML（卡片式布局）"""
@@ -252,8 +364,6 @@ class ResultPanel(QWidget):
 
         desc = kb.get("description", "")
         sys = self.kb.get_system_info(kb.get("system", ""))["name"]
-
-        detail = kb.get("detail", "")
 
         html = f"""
         <div style="font-family: 'Microsoft YaHei UI', Consolas, sans-serif;">"""
@@ -293,6 +403,11 @@ class ResultPanel(QWidget):
             """
 
         causes = kb.get("common_causes", [])
+        if isinstance(causes, str):
+            try:
+                causes = json.loads(causes)
+            except (json.JSONDecodeError, TypeError):
+                causes = []
         if causes:
             items = "".join(
                 f'<li style="margin: 6px 0; padding-left: 4px; color: {TEXT_SECONDARY};">{c}</li>'
@@ -307,7 +422,11 @@ class ResultPanel(QWidget):
             """
 
         steps = kb.get("diagnostic_steps", [])
-        if steps:
+        if isinstance(steps, str):
+            try:
+                steps = json.loads(steps)
+            except (json.JSONDecodeError, TypeError):
+                steps = []
             items = "".join(
                 f'<li style="margin: 8px 0; padding-left: 4px; color: {TEXT_SECONDARY}; line-height: 1.6;">{s}</li>'
                 for s in steps
@@ -320,11 +439,13 @@ class ResultPanel(QWidget):
             """
 
         related = kb.get("related_codes", [])
+        if isinstance(related, str):
+            related = [r.strip() for r in related.split(",") if r.strip()]
         if related:
-            chips = "".join(
-                f'<span style="display: inline-block; background-color: {PRIMARY_BG}; color: {PRIMARY}; '
-                f'font-family: Consolas; font-size: 12px; padding: 2px 10px; border-radius: 4px; '
-                f'margin: 2px 4px 2px 0;">{r}</span>'
+            chips = " ".join(
+                f'<a href="dtc://{r}" style="text-decoration: none; '
+                f'background-color: {PRIMARY_BG}; color: {PRIMARY}; '
+                f'font-family: Consolas; font-size: 12px; padding: 2px 10px; border-radius: 4px;">{r}</a>'
                 for r in related
             )
             html += f"""

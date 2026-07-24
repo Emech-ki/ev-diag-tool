@@ -9,6 +9,7 @@ import os
 import sys
 import shutil
 import threading
+from datetime import datetime
 from pathlib import Path
 from typing import Optional, List, Dict, Any, Tuple
 from src.config import DB_PATH as CONFIG_DB_PATH
@@ -131,11 +132,11 @@ class DatabaseManager:
         conn = self.get_connection()
         try:
             cursor = conn.cursor()
-            pattern = f"%{keyword}%"
+            pattern = f"%{self._escape_like(keyword)}%"
             cursor.execute("""
                 SELECT code, description, system, severity
                 FROM obd_codes
-                WHERE code LIKE ? OR description LIKE ?
+                WHERE code LIKE ? ESCAPE '\\' OR description LIKE ? ESCAPE '\\'
                 ORDER BY code
                 LIMIT ?
             """, (pattern, pattern, limit))
@@ -257,7 +258,8 @@ class DatabaseManager:
 
     def save_history(self, code: str, vehicle_info: str = "", symptoms: str = "",
                      knowledge_found: bool = False, ai_suggestion: str = "") -> bool:
-        """保存诊断记录"""
+        """保存诊断记录（使用本地时间）"""
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         with self._write_lock:
             conn = self.get_connection()
             try:
@@ -265,9 +267,9 @@ class DatabaseManager:
                 cursor = conn.cursor()
                 cursor.execute("""
                     INSERT INTO diagnostic_history
-                        (code, vehicle_info, symptoms, knowledge_found, ai_suggestion)
-                    VALUES (?, ?, ?, ?, ?)
-                """, (code, vehicle_info, symptoms, 1 if knowledge_found else 0, ai_suggestion))
+                        (code, vehicle_info, symptoms, knowledge_found, ai_suggestion, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                """, (code, vehicle_info, symptoms, 1 if knowledge_found else 0, ai_suggestion, now))
                 conn.commit()
                 return True
             except Exception:
@@ -297,12 +299,12 @@ class DatabaseManager:
         conn = self.get_connection()
         try:
             cursor = conn.cursor()
-            pattern = f"%{keyword}%"
+            pattern = f"%{self._escape_like(keyword)}%"
             cursor.execute("""
                 SELECT id, code, vehicle_info, symptoms, knowledge_found,
                        ai_suggestion, created_at
                 FROM diagnostic_history
-                WHERE code LIKE ? OR vehicle_info LIKE ? OR symptoms LIKE ?
+                WHERE code LIKE ? ESCAPE '\\' OR vehicle_info LIKE ? ESCAPE '\\' OR symptoms LIKE ? ESCAPE '\\'
                 ORDER BY created_at DESC
                 LIMIT ?
             """, (pattern, pattern, pattern, limit))
@@ -324,6 +326,11 @@ class DatabaseManager:
                 raise
             finally:
                 conn.close()
+
+    @staticmethod
+    def _escape_like(keyword: str) -> str:
+        """转义 SQL LIKE 通配符 % 和 _，防止意外匹配"""
+        return keyword.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
     @staticmethod
     def parse_json_field(json_str: str) -> list:

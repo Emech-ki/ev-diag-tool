@@ -25,7 +25,10 @@ from src.version import VERSION_LINE
 
 
 class DiagnoseWorker(QThread):
-    finished = pyqtSignal(object)
+    kb_ready = pyqtSignal(object)   # partial DiagnosticResult (KB done, AI not yet)
+    ai_token = pyqtSignal(str)       # one token from streaming AI
+    ai_finished = pyqtSignal(str)    # full AI text when streaming done
+    finished = pyqtSignal(object)    # complete DiagnosticResult
     error = pyqtSignal(str)
 
     def __init__(self, engine: DiagnosticEngine, code: str, vehicle: str = "", extra: str = ""):
@@ -37,7 +40,42 @@ class DiagnoseWorker(QThread):
 
     def run(self):
         try:
-            result = self.engine.diagnose(code=self.code, vehicle_info=self.vehicle, additional_info=self.extra)
+            code = self.code.strip().upper()
+
+            # Phase 1: KB query (fast)
+            knowledge = self.engine.kb.lookup(code)
+            ai_available = self.engine.llm.is_available()
+
+            partial = DiagnosticResult(
+                code=code,
+                knowledge=knowledge,
+                ai_suggestion=None,
+                ai_available=ai_available
+            )
+            self.kb_ready.emit(partial)
+
+            # Phase 2: AI streaming
+            ai_suggestion = None
+            if ai_available:
+                tokens = []
+                for token in self.engine.llm.get_diagnostic_suggestion_stream(
+                    code=code,
+                    knowledge=knowledge,
+                    vehicle_info=self.vehicle,
+                    additional_info=self.extra
+                ):
+                    tokens.append(token)
+                    self.ai_token.emit(token)
+                ai_suggestion = "".join(tokens)
+                self.ai_finished.emit(ai_suggestion)
+
+            # Final complete result
+            result = DiagnosticResult(
+                code=code,
+                knowledge=knowledge,
+                ai_suggestion=ai_suggestion,
+                ai_available=ai_available
+            )
             self.finished.emit(result)
         except Exception as e:
             self.error.emit(str(e))
@@ -234,6 +272,7 @@ class MainWindow(QMainWindow):
         """)
 
         self.result_panel = ResultPanel()
+        self.result_panel.diagnose_requested.connect(self._on_related_code_clicked)
         self.tab_widget.addTab(self.result_panel, "诊断结果")
 
         self.agent_panel = AgentChatPanel(self.engine)
@@ -316,7 +355,7 @@ class MainWindow(QMainWindow):
             return
         self.engine.llm.set_model(model_name)
         # 重置可用性缓存，让下次诊断时重新检查
-        self.engine.llm._available = None
+        self.engine.llm.reset_availability()
         self.status_bar.showMessage(f"已切换模型: {model_name} — 下次诊断时生效")
 
     # ── Diagnosis ──
@@ -336,6 +375,9 @@ class MainWindow(QMainWindow):
         # 断开旧 worker 信号，防止泄漏
         if self.worker is not None:
             try:
+                self.worker.kb_ready.disconnect(self._on_kb_ready)
+                self.worker.ai_token.disconnect(self._on_ai_token)
+                self.worker.ai_finished.disconnect(self._on_ai_finished)
                 self.worker.finished.disconnect(self._on_diagnose_finished)
                 self.worker.error.disconnect(self._on_diagnose_error)
             except TypeError:
@@ -350,25 +392,74 @@ class MainWindow(QMainWindow):
             vehicle=self.vehicle_input.text().strip(),
             extra=self.symptom_input.text().strip()
         )
+        self.worker.kb_ready.connect(self._on_kb_ready)
+        self.worker.ai_token.connect(self._on_ai_token)
+        self.worker.ai_finished.connect(self._on_ai_finished)
         self.worker.finished.connect(self._on_diagnose_finished)
         self.worker.error.connect(self._on_diagnose_error)
         self.worker.start()
 
-    def _on_diagnose_finished(self, result: DiagnosticResult):
+    def _on_kb_ready(self, result: DiagnosticResult):
+        """知识库查询完成，立即展示"""
         self.search_btn.setEnabled(True)
         self.search_btn.setText("诊断")
-        self.status_bar.showMessage(f"诊断完成: {result.code}")
+        self.status_bar.showMessage(f"知识库查询完成 — AI 诊断建议生成中...")
 
-        self.result_panel.show_result(result)
+        self.result_panel.show_kb_result(result)
 
-        # 保存诊断历史
+        if result.has_knowledge():
+            self.tab_widget.setCurrentIndex(0)
+
+    def _on_related_code_clicked(self, code: str):
+        """相关故障码点击，直接查询知识库并展示"""
+        # 清理正在运行的诊断 worker
+        if self.worker is not None:
+            try:
+                self.worker.kb_ready.disconnect(self._on_kb_ready)
+                self.worker.ai_token.disconnect(self._on_ai_token)
+                self.worker.ai_finished.disconnect(self._on_ai_finished)
+                self.worker.finished.disconnect(self._on_diagnose_finished)
+                self.worker.error.disconnect(self._on_diagnose_error)
+            except TypeError:
+                pass
+            if self.worker.isRunning():
+                self.worker.quit()
+                self.worker.wait(500)
+
+        self.code_input.setText(code)
+        self.status_bar.showMessage(f"正在查询相关故障码 {code}...")
+
+        knowledge = self.engine.kb.lookup(code)
+        if knowledge:
+            result = DiagnosticResult(
+                code=code,
+                knowledge=knowledge,
+                ai_suggestion=None,
+                ai_available=self.engine.llm.is_available()
+            )
+            self.result_panel.show_lookup_result(result)
+            self.tab_widget.setCurrentIndex(0)
+            self.status_bar.showMessage(f"已跳转至 {code}")
+        else:
+            self.status_bar.showMessage(f"未找到故障码 {code} 的信息")
+
+    def _on_ai_token(self, token: str):
+        """收到 AI 流式 token"""
+        self.result_panel.append_ai_text(token)
+
+    def _on_ai_finished(self, full_text: str):
+        """AI 流式完成，重新格式化显示"""
+        if full_text:
+            code = self.code_input.text().strip().upper()
+            self.result_panel.finalize_ai_suggestion(code, full_text)
+        self.status_bar.showMessage("诊断完成 — AI 建议已生成")
+
+    def _on_diagnose_finished(self, result: DiagnosticResult):
+        """诊断全部完成（保存历史、同步 Agent）"""
         self._save_diagnosis_history(result)
 
         if result.has_ai() or result.has_knowledge():
             self.agent_panel.sync_diagnosis(result)
-
-        if result.has_knowledge():
-            self.tab_widget.setCurrentIndex(0)
 
     def _save_diagnosis_history(self, result: DiagnosticResult):
         """保存诊断记录到历史"""
@@ -383,11 +474,10 @@ class MainWindow(QMainWindow):
                 ai_suggestion=result.ai_suggestion or ""
             )
             self.history_panel.refresh()
-        except Exception:
-            pass
+        except Exception as e:
+            self.status_bar.showMessage(f"保存历史记录失败: {e}")
 
     def _on_diagnose_error(self, error_msg: str):
         self.search_btn.setEnabled(True)
         self.search_btn.setText("诊断")
-        self.status_bar.showMessage("诊断失败")
-        QMessageBox.critical(self, "诊断错误", f"错误信息:\n{error_msg}")
+        self.status_bar.showMessage(f"诊断异常: {error_msg}")
