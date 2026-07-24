@@ -1,136 +1,90 @@
-# EV-Diag-Tool Handoff
+# Handoff Document — EV-Diag-Tool
 
-## 项目信息
-- **远程仓库:** https://github.com/Emech-ki/ev-diag-tool
-- **当前版本:** v1.3.0 — 相关码点击跳转 bug 修复
-- **技术栈:** Python 3.14 + PyQt6 + SQLite + Ollama API
-- **入口:** `python src/main.py`
-- **测试:** `python -m pytest tests/ -v`
+**Date:** 2026-07-25
+**Project:** `D:\桌面\诊断ai程序\ev-diag-tool`
+**Repo:** https://github.com/Emech-ki/ev-diag-tool.git
+**Latest commit:** `589d666` (master)
 
-## 最近完成的工作（本次会话）
+---
 
-### 1. DtcTextBrowser 子类（阻止 Qt 默认导航）
-- `result_panel.py` — 新增 `DtcTextBrowser(QTextBrowser)` 子类，覆写 `setSource()`
-- 拦截 `dtc://` scheme，不调 `super().setSource()`，阻止 Qt 报 "No document for dtc://..."
-- `knowledge_browser` 从 `QTextBrowser()` 改为 `DtcTextBrowser()`
+## 本次会话完成的工作
 
-### 2. QTimer.singleShot 延迟信号发射（修复竞争条件）
-- **根因：** Qt 的 `QTextBrowser` 在 `anchorClicked` 信号处理器内部仍在执行 `setSource`，此时 `show_lookup_result()` 调用 `clear()` 会破坏 Qt 内部状态机，导致 "No document" 警告 + 相关码信息不显示
-- `result_panel.py:_on_anchor_clicked` — `diagnose_requested.emit(code)` 改为 `QTimer.singleShot(0, ...)` 延迟发射
-- `main_window.py:_on_related_code_clicked` — 拆分为两部分：
-  - `_on_related_code_clicked(code)` — worker 清理 + 设置输入框（同步）
-  - `_do_related_code_lookup(code)` — kb.lookup + show_lookup_result（延迟）
+### 1. Handbook 阅读 + 问题发现
 
-### 3. ⚠️ 当前状态：bug 仍未完全解决
-- `QTimer.singleShot` 延迟方案已实现，但实际运行中 "No document for dtc://..." 仍然出现
-- 可能需要更深层的方案：子类化覆写 `mouseReleaseEvent` 或改用 `QLabel` + `linkActivated`
-- **下一步重点排查方向：** PyQt6 中 `setSource` 虚方法覆写是否真正生效（C++ 层面可能直接调用基类）
+读取了 `README.md`（项目记忆/蓝图）、`文件清单.txt`、`项目整体架构图.txt`，以及 `.opencode/skills/` 下的 prototype、diagnosing-bugs、code-review 等技能文档。通过 2 个并行 agent 扫描全部源码，发现 6 个初始问题。
 
-## 已知未完成项
-1. **🔴 dtc:// 点击跳转 bug** — "No document for dtc://..." 仍然出现，相关码信息不显示，需继续排查
-2. **相关码点击后完整诊断联动** — 当前只做同步 KB 查询，需要决定是否触发 AI 诊断
-3. **打包 exe** — 需要更新 `EV-Diag-Tool_v1.0.0.spec` 文件以包含新增文件
-4. **诊断历史导出** — 支持导出为 PDF/HTML
-5. **"Streaming response failed" bug** — 排查中，待确认根因
+### 2. 初始 6 项修复（已提交）
 
-## 项目结构
+| # | 文件 | 修复 |
+|---|------|------|
+| 1 | `result_panel.py:431` | 诊断步骤永远不显示 — HTML 生成嵌套在 `isinstance(steps, str)` 块内 |
+| 2 | `agent_chat.py:251` | 流式消息替换不可靠 — 改用消息列表 + 重建方案 |
+| 3 | `result_panel.py` | 局部变量 `html` 遮蔽 `html` 模块 → 重命名为 `kb_html` |
+| 4 | `agent.py:103,145` | `CONTEXT_WINDOW_SIZE=10` 定义但未使用 |
+| 5 | `llm_client.py:255,274` | 硬编码 temperature/num_predict → 使用模块常量 |
+| 6 | `schema.py:48-63` | 删除 5 个从未使用的 SQL 查询常量 |
 
-```
-ev-diag-tool/
-├── src/
-│   ├── main.py            ← 程序入口
-│   ├── config.py          ← .env 配置管理（新增）
-│   ├── version.py         ← 版本号
-│   ├── ui/
-│   │   ├── main_window.py ← 主窗口（含模型选择器）
-│   │   ├── result_panel.py← 诊断结果面板
-│   │   ├── agent_chat.py  ← AI 对话面板（流式响应）
-│   │   ├── history_panel.py ← 历史记录面板（新增）
-│   │   └── styles/        ← 样式常量
-│   ├── database/
-│   │   ├── db_manager.py  ← 数据库管理（含历史记录方法）
-│   │   └── schema.py      ← 表结构定义（含 history 表）
-│   ├── engine/
-│   │   ├── diagnostic.py  ← 诊断流程控制
-│   │   └── knowledge_base.py ← 知识库查询
-│   └── ai/
-│       ├── llm_client.py  ← Ollama API 客户端（流式+模型切换）
-│       ├── prompt_templates.py ← 提示词模板
-│       └── agent.py       ← AI Agent（流式对话）
-├── data/
-│   ├── seed/              ← 种子数据（已修复 B1100/B1101）
-│   └── obd_codes.db       ← SQLite 数据库（150 条 + history 表）
-├── tests/
-│   ├── test_database.py   ← 数据库测试（19个）
-│   ├── test_engine.py     ← 引擎测试（12个）
-│   └── test_ai.py         ← AI 测试（10个）
-├── scripts/
-│   └── seed_db.py         ← 数据库初始化（已更新支持 history 表）
-├── .env.example           ← 配置文件模板
-├── .env                   ← 实际配置（已创建，git 忽略）
-└── requirements.txt       ← 依赖清单（含 pytest）
-```
+### 3. 代码审查（9 个 agent × 10 个角度）
 
-## 运行方式
+对修改后的 5 个文件进行全面审查，发现 15 个额外问题。
 
-```bash
-# 1. 安装依赖
-pip install -r requirements.txt
+### 4. 全部 15 项修复（已提交）
 
-# 2. 确保 Ollama 运行
-ollama serve
+**agent_chat.py（10 项）：**
+- 线程安全：添加 `_stop_worker()` 辅助方法，`_on_new_diagnosis`/`_on_clear_chat`/`sync_diagnosis` 先停止 worker 再操作 session
+- `wait(1000)` → `wait(5000)`
+- `_append_message_html` 添加 `html.escape()` 转义
+- `_on_agent_error` 记录部分 `_stream_content` 到 `_messages`
+- `_clear_display` 重置 `_stream_content`
+- `__init__` 初始化 `_stream_content = ""`
+- 预编译 `_BOLD_RE`
+- `_rebuild_display` 添加 `setUpdatesEnabled(False/True)` 减少闪烁
 
-# 3. 初始化数据库（如需更新）
-python scripts/seed_db.py
+**result_panel.py（3 项）：**
+- `desc`/`detail`/causes/steps 全部 `html.escape()`
+- `sys` 变量重命名为 `sys_name`，防空处理
+- 相关码点击修复：`url.path()` → `url.host().upper()`
 
-# 4. 运行程序
-python src/main.py
+**llm_client.py（1 项）：**
+- 流式重试改为仅连接阶段重试，避免重复内容
 
-# 5. 运行测试
-python -m pytest tests/ -v
-```
+**knowledge_base.py（1 项）：**
+- `related_codes` 解析兼容 JSON 数组格式
 
-## 配置文件 (.env)
+**main_window.py（1 项）：**
+- Ollama 可用性检查移到后台线程（`_OllamaCheckWorker`），解决启动卡顿 1-2 秒
 
-```env
-OLLAMA_BASE_URL=http://localhost:11434
-OLLAMA_MODEL_NAME=qwen2.5:7b
-DB_PATH=
-LOG_LEVEL=INFO
-```
+---
 
-## 数据库表
+## 当前项目状态
 
-### obd_codes（故障码表）
-- 150 条记录（P/B/C/U 系列）
-- 字段：code, system, description, detail, severity, common_causes, diagnostic_steps, related_codes, symptoms
+- **版本：** v1.3.0 "相关码跳转修复"
+- **阶段：** 阶段一（基础查询版）基本完成
+- **功能：** 故障码查询、知识库展示、AI 诊断建议（流式）、AI 对话、诊断历史、相关码跳转、模型切换
+- **已知遗留：** `_messages` 列表无上限（当前会话规模无需限制）
 
-### diagnostic_history（诊断历史表，新增）
-- 自动保存每次诊断记录
-- 字段：code, vehicle_info, symptoms, knowledge_found, ai_suggestion, created_at
+---
 
-## Git 提交历史
+## 建议的下一步工作
 
-```
-ecf2dd0 feat: streaming diagnosis + related code jump + code review fixes
-e3a50f7 fix: auto-create diagnostic_history table on startup
-c959ee6 docs: update handoff for v1.1.0 - phase 2 complete
-4428222 fix: code review issues - streaming performance, retry, imports
-5a81a02 feat: phase 2 enhancements - streaming, model selector, history, tests
-4c51c84 feat: add .env config support + fix timeout + fix b_codes symptoms
-5a98119 fix: simplify database check in main.py
-8cbc394 Add handoff document
-a3e948b Fix: resolve 42 code review issues (MEDIUM+LOW) + agent session bug
-8425375 Initial commit: EV-Diag-Tool v1.0.0
-```
+1. **阶段二：AI 增强版** — 优化 LLM prompt、支持更多模型、添加车型数据库
+2. **测试补充** — `tests/` 目录下目前无测试文件，建议添加 `test_database.py`、`test_engine.py`、`test_ai.py`
+3. **打包 exe** — PyInstaller 打包、`scripts/build_exe.py` 完善
+4. **性能优化** — `_messages` 添加上限、流式渲染频率优化
 
-## 下一步建议
+---
 
-1. **🔴 dtc:// 点击跳转 bug（最高优先级）** — "No document" 仍然出现，需尝试：
-   - 方案 A：覆写 `mouseReleaseEvent`，在点击 `dtc://` 链接时自行处理并 `event.accept()`
-   - 方案 B：改用 `QLabel` + `linkActivated` 信号（无 `setSource` 问题）
-   - 方案 C：用 `eventFilter` 拦截 `QTextBrowser` 的鼠标事件
-2. **相关码点击后完整诊断** — 点击相关码时是否触发完整诊断（含AI流式）
-3. **打包 exe** — 更新 PyInstaller spec 文件，打包新功能
-4. **多语言支持** — 当前只支持中文
-5. **诊断报告导出** — 支持导出为 PDF/HTML
+## Suggested Skills
+
+- `/diagnosing-bugs` — 如果遇到新 bug，使用 6 阶段诊断流程
+- `/code-review` — 下次大规模修改后进行全面代码审查
+- `/tdd` — 为 `tests/` 目录补充单元测试
+- `/improve-codebase-architecture` — 阶段二开始前审视架构
+
+---
+
+## 敏感信息说明
+
+- `.env` 文件已通过 `.gitignore` 排除，不包含在提交中
+- Ollama 默认配置：`http://localhost:11434`，模型 `qwen2.5:7b`
+- 无 API 密钥或其他敏感凭证
