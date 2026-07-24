@@ -411,8 +411,7 @@ class MainWindow(QMainWindow):
             self.tab_widget.setCurrentIndex(0)
 
     def _on_related_code_clicked(self, code: str):
-        """相关故障码点击，直接查询知识库并展示"""
-        # 清理正在运行的诊断 worker
+        """相关故障码点击，清理 worker + 延迟查询"""
         if self.worker is not None:
             try:
                 self.worker.kb_ready.disconnect(self._on_kb_ready)
@@ -428,7 +427,10 @@ class MainWindow(QMainWindow):
 
         self.code_input.setText(code)
         self.status_bar.showMessage(f"正在查询相关故障码 {code}...")
+        QTimer.singleShot(0, lambda: self._do_related_code_lookup(code))
 
+    def _do_related_code_lookup(self, code: str):
+        """实际执行相关码查询（延迟到 Qt 完成点击处理后）"""
         knowledge = self.engine.kb.lookup(code)
         if knowledge:
             result = DiagnosticResult(

@@ -11,7 +11,7 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QTextBrowser, QFrame, QSplitter, QLineEdit, QPushButton, QMessageBox
 )
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QTextCursor
 
 from src.engine.diagnostic import DiagnosticResult
@@ -21,6 +21,13 @@ from src.ui.styles import (
     TEXT_PRIMARY, TEXT_SECONDARY, TEXT_MUTED, BG, FONT_MONO,
     SEVERITY_STYLES, WARNING, WARNING_BG
 )
+
+
+class DtcTextBrowser(QTextBrowser):
+    def setSource(self, url):
+        if url.scheme() == "dtc":
+            return
+        super().setSource(url)
 
 
 class ResultPanel(QWidget):
@@ -56,7 +63,7 @@ class ResultPanel(QWidget):
         knowledge_layout.setContentsMargins(0, 0, 8, 0)
         knowledge_layout.setSpacing(8)
 
-        self.knowledge_browser = QTextBrowser()
+        self.knowledge_browser = DtcTextBrowser()
         self.knowledge_browser.setOpenExternalLinks(False)
         self.knowledge_browser.setStyleSheet(f"""
             QTextBrowser {{
@@ -191,7 +198,7 @@ class ResultPanel(QWidget):
         if url.scheme() == "dtc":
             code = url.path().strip("/")
             if code:
-                self.diagnose_requested.emit(code)
+                QTimer.singleShot(0, lambda c=code: self.diagnose_requested.emit(c))
 
     def _on_save_symptom(self):
         """保存技师记录的现象"""
