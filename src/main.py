@@ -21,17 +21,15 @@ from src.ui.main_window import MainWindow
 
 
 def check_database():
-    """检查数据库是否存在（统一使用 DatabaseManager 路径解析）"""
-    from src.database.db_manager import DatabaseManager
-    db = DatabaseManager()
-    info = db.get_database_info()
-    if not info.get("exists"):
+    """检查数据库是否存在"""
+    db_path = os.path.join(PROJECT_ROOT, "data", "obd_codes.db")
+    if not os.path.exists(db_path):
         QMessageBox.warning(
             None,
             "数据库未初始化",
             "数据库文件不存在！\n\n请先运行以下命令初始化数据库：\n\n"
             f"    python scripts/seed_db.py\n\n"
-            f"期待路径: {info.get('path', '?')}"
+            f"期待路径: {db_path}"
         )
         return False
     return True
@@ -94,9 +92,8 @@ def main():
         }
     """)
 
-    # 检查数据库（不存在则退出）
-    if not check_database():
-        sys.exit(1)
+    # 检查数据库
+    check_database()
 
     # 启动主窗口
     window = MainWindow()
