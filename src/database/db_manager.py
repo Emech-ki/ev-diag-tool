@@ -38,6 +38,28 @@ class DatabaseManager:
         self.db_path = db_path
         self._write_lock = threading.Lock()
         self._initialized = True
+        self._ensure_tables()
+
+    def _ensure_tables(self):
+        """检查并创建缺失的表（数据库自动迁移）"""
+        from src.database.schema import (
+            CREATE_TABLE_HISTORY,
+            CREATE_INDEX_HISTORY_CODE,
+            CREATE_INDEX_HISTORY_TIME,
+        )
+        conn = self.get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='diagnostic_history'"
+            )
+            if cursor.fetchone() is None:
+                conn.execute(CREATE_TABLE_HISTORY)
+                conn.execute(CREATE_INDEX_HISTORY_CODE)
+                conn.execute(CREATE_INDEX_HISTORY_TIME)
+                conn.commit()
+        finally:
+            conn.close()
 
     @staticmethod
     def _resolve_db_path() -> str:
