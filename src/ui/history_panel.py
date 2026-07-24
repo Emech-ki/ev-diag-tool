@@ -9,7 +9,7 @@ from PyQt6.QtWidgets import (
     QHeaderView, QMessageBox, QAbstractItemView, QFrame
 )
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QColor
+from PyQt6.QtGui import QColor, QFont
 
 from src.database.db_manager import DatabaseManager
 from src.ui.styles import (
@@ -146,7 +146,7 @@ class HistoryPanel(QWidget):
 
         for i, record in enumerate(records):
             code_item = QTableWidgetItem(record.get("code", ""))
-            code_item.setFont(__import__('PyQt6.QtGui', fromlist=['QFont']).QFont("Consolas", 12))
+            code_item.setFont(QFont("Consolas", 12))
             self.table.setItem(i, 0, code_item)
 
             self.table.setItem(i, 1, QTableWidgetItem(record.get("vehicle_info", "") or "-"))

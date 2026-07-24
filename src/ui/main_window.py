@@ -239,7 +239,7 @@ class MainWindow(QMainWindow):
         self.agent_panel = AgentChatPanel(self.engine)
         self.tab_widget.addTab(self.agent_panel, "AI 助手")
 
-        self.history_panel = HistoryPanel(self.engine.db)
+        self.history_panel = HistoryPanel(self.engine.kb.db)
         self.tab_widget.addTab(self.history_panel, "历史记录")
 
         content_layout.addWidget(self.tab_widget, 1)
@@ -315,7 +315,9 @@ class MainWindow(QMainWindow):
         if not model_name:
             return
         self.engine.llm.set_model(model_name)
-        self.status_bar.showMessage(f"已切换模型: {model_name}")
+        # 重置可用性缓存，让下次诊断时重新检查
+        self.engine.llm._available = None
+        self.status_bar.showMessage(f"已切换模型: {model_name} — 下次诊断时生效")
 
     # ── Diagnosis ──
 
@@ -373,7 +375,7 @@ class MainWindow(QMainWindow):
         try:
             vehicle = self.vehicle_input.text().strip()
             symptom = self.symptom_input.text().strip()
-            self.engine.db.save_history(
+            self.engine.kb.db.save_history(
                 code=result.code,
                 vehicle_info=vehicle,
                 symptoms=symptom,

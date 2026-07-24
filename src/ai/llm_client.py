@@ -256,20 +256,33 @@ class LLMClient:
             }
         }).encode("utf-8")
 
-        req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"}, method="POST")
-        with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT) as response:
-            for line in response:
-                if not line:
-                    continue
-                try:
-                    chunk = json.loads(line.decode("utf-8"))
-                    token = chunk.get("message", {}).get("content", "")
-                    if token:
-                        yield token
-                    if chunk.get("done", False):
-                        break
-                except json.JSONDecodeError:
-                    continue
+        last_error = None
+        for attempt in range(MAX_RETRIES + 1):
+            try:
+                req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"}, method="POST")
+                with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT) as response:
+                    for line in response:
+                        if not line:
+                            continue
+                        try:
+                            chunk = json.loads(line.decode("utf-8"))
+                            token = chunk.get("message", {}).get("content", "")
+                            if token:
+                                yield token
+                            if chunk.get("done", False):
+                                break
+                        except json.JSONDecodeError:
+                            continue
+                return  # 成功，直接返回
+            except (urllib.error.URLError, urllib.error.HTTPError, ConnectionError, TimeoutError) as e:
+                last_error = e
+                if attempt < MAX_RETRIES:
+                    wait = 2 ** attempt
+                    print(f"  ⚠️ Ollama 流式请求失败 (尝试 {attempt + 1}/{MAX_RETRIES + 1}): {e}，{wait}秒后重试")
+                    time.sleep(wait)
+                    yield f"\n\n⚠️ 连接中断，正在重试 ({attempt + 1}/{MAX_RETRIES})...\n"
+                else:
+                    raise last_error
 
 
 # 便捷函数

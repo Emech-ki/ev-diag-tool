@@ -230,30 +230,36 @@ class AgentChatPanel(QWidget):
         self._append_html(html)
 
     def _start_stream_message(self):
-        """开始流式消息（添加空的 assistant 气泡）"""
-        html = f"""
-        <div style="margin: 8px 0;" id="stream-msg">
-            <div style="display: inline-block; background-color: #F5F5F5;
-                        color: {TEXT_PRIMARY}; padding: 10px 16px; border-radius: 14px 14px 14px 4px;
-                        max-width: 70%; text-align: left; font-size: 14px; line-height: 1.6;">
-                <span id="stream-content"></span>
-            </div>
-        </div>
-        """
-        self._append_html(html)
+        """开始流式消息"""
         self._stream_content = ""
+        self._stream_start_pos = self.chat_edit.textCursor().position()
 
     def _append_stream_token(self, token: str):
-        """追加流式 token 到当前消息"""
+        """追加流式 token 到当前消息（直接追加文本，不重写 HTML）"""
         self._stream_content += token
-        escaped = self._stream_content.replace('<', '&lt;').replace('>', '&gt;')
+
+        # 转义 HTML 特殊字符
+        escaped = token.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
         escaped = re.sub(r'\*\*(.*?)\*\*', r'<strong>\1</strong>', escaped)
         escaped = escaped.replace('\n', '<br>')
 
         cursor = self.chat_edit.textCursor()
         cursor.movePosition(QTextCursor.MoveOperation.End)
-        cursor.select(QTextCursor.SelectionType.Document)
-        full_text = cursor.selectedText()
+        cursor.insertHtml(escaped)
+        self.chat_edit.ensureCursorVisible()
+
+    def _finalize_stream_message(self):
+        """流式完成后，用完整 HTML 替换（确保格式正确）"""
+        if not self._stream_content:
+            return
+        escaped = self._stream_content.replace('<', '&lt;').replace('>', '&gt;')
+        escaped = re.sub(r'\*\*(.*?)\*\*', r'<strong>\1</strong>', escaped)
+        escaped = escaped.replace('\n', '<br>')
+
+        # 移动到流式消息起始位置，删除流式内容，插入最终格式化内容
+        cursor = self.chat_edit.textCursor()
+        cursor.movePosition(QTextCursor.MoveOperation.Start)
+        cursor.setPosition(self._stream_start_pos, QTextCursor.MoveMode.MoveAnchor)
 
         html = f"""
         <div style="margin: 8px 0;">
@@ -264,8 +270,7 @@ class AgentChatPanel(QWidget):
             </div>
         </div>
         """
-        self.chat_edit.setHtml(html)
-        self.chat_edit.ensureCursorVisible()
+        cursor.insertHtml(html)
 
     def on_send_message(self):
         message = self.message_input.text().strip()
@@ -299,6 +304,7 @@ class AgentChatPanel(QWidget):
         self._append_stream_token(token)
 
     def _on_stream_finished(self):
+        self._finalize_stream_message()
         self._set_input_enabled(True)
 
     def _on_agent_error(self, error_msg: str):
