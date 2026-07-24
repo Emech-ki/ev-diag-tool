@@ -252,8 +252,8 @@ class LLMClient:
             "prompt": prompt,
             "stream": False,
             "options": {
-                "temperature": 0.7,
-                "num_predict": 1024
+                "temperature": TEMPERATURE,
+                "num_predict": MAX_TOKENS
             }
         }).encode("utf-8")
 
@@ -271,38 +271,43 @@ class LLMClient:
             "prompt": prompt,
             "stream": True,
             "options": {
-                "temperature": 0.7,
-                "num_predict": 1024
+                "temperature": TEMPERATURE,
+                "num_predict": MAX_TOKENS
             }
         }).encode("utf-8")
 
+        # 仅在连接建立阶段重试，流式开始后不再重试（避免重复内容）
+        response = None
         last_error = None
         for attempt in range(MAX_RETRIES + 1):
             try:
                 req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"}, method="POST")
-                with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT) as response:
-                    for line in response:
-                        if not line:
-                            continue
-                        try:
-                            chunk = json.loads(line.decode("utf-8"))
-                            token = chunk.get("response", "")
-                            if token:
-                                yield token
-                            if chunk.get("done", False):
-                                break
-                        except json.JSONDecodeError:
-                            continue
-                return
+                response = urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT)
+                break
             except (urllib.error.URLError, urllib.error.HTTPError, ConnectionError, TimeoutError) as e:
                 last_error = e
                 if attempt < MAX_RETRIES:
                     wait = 2 ** attempt
-                    print(f"  ⚠️ Ollama 流式请求失败 (尝试 {attempt + 1}/{MAX_RETRIES + 1}): {e}，{wait}秒后重试")
+                    print(f"  ⚠️ Ollama 流式连接失败 (尝试 {attempt + 1}/{MAX_RETRIES + 1}): {e}，{wait}秒后重试")
                     time.sleep(wait)
-                    yield f"\n\n⚠️ 连接中断，正在重试 ({attempt + 1}/{MAX_RETRIES})...\n"
                 else:
                     raise last_error
+
+        try:
+            for line in response:
+                if not line:
+                    continue
+                try:
+                    chunk = json.loads(line.decode("utf-8"))
+                    token = chunk.get("response", "")
+                    if token:
+                        yield token
+                    if chunk.get("done", False):
+                        break
+                except json.JSONDecodeError:
+                    continue
+        finally:
+            response.close()
 
     def _call_ollama_chat(self, messages: List[Dict[str, str]]) -> str:
         """调用 Ollama Chat API"""
@@ -336,33 +341,38 @@ class LLMClient:
             }
         }).encode("utf-8")
 
+        # 仅在连接建立阶段重试，流式开始后不再重试（避免重复内容）
+        response = None
         last_error = None
         for attempt in range(MAX_RETRIES + 1):
             try:
                 req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"}, method="POST")
-                with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT) as response:
-                    for line in response:
-                        if not line:
-                            continue
-                        try:
-                            chunk = json.loads(line.decode("utf-8"))
-                            token = chunk.get("message", {}).get("content", "")
-                            if token:
-                                yield token
-                            if chunk.get("done", False):
-                                break
-                        except json.JSONDecodeError:
-                            continue
-                return  # 成功，直接返回
+                response = urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT)
+                break
             except (urllib.error.URLError, urllib.error.HTTPError, ConnectionError, TimeoutError) as e:
                 last_error = e
                 if attempt < MAX_RETRIES:
                     wait = 2 ** attempt
-                    print(f"  ⚠️ Ollama 流式请求失败 (尝试 {attempt + 1}/{MAX_RETRIES + 1}): {e}，{wait}秒后重试")
+                    print(f"  ⚠️ Ollama 流式连接失败 (尝试 {attempt + 1}/{MAX_RETRIES + 1}): {e}，{wait}秒后重试")
                     time.sleep(wait)
-                    yield f"\n\n⚠️ 连接中断，正在重试 ({attempt + 1}/{MAX_RETRIES})...\n"
                 else:
                     raise last_error
+
+        try:
+            for line in response:
+                if not line:
+                    continue
+                try:
+                    chunk = json.loads(line.decode("utf-8"))
+                    token = chunk.get("message", {}).get("content", "")
+                    if token:
+                        yield token
+                    if chunk.get("done", False):
+                        break
+                except json.JSONDecodeError:
+                    continue
+        finally:
+            response.close()
 
 
 # 便捷函数

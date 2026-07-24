@@ -3,6 +3,7 @@
 负责从 SQLite 数据库中查询故障码知识
 """
 
+import json
 from typing import Optional, Dict, Any, List
 from src.database.db_manager import get_db, DatabaseManager
 
@@ -46,9 +47,21 @@ class KnowledgeBase:
         result["common_causes"] = self.db.parse_json_field(result.get("common_causes", "[]"))
         result["diagnostic_steps"] = self.db.parse_json_field(result.get("diagnostic_steps", "[]"))
 
-        # 解析相关故障码
+        # 解析相关故障码（兼容 JSON 数组和逗号分隔两种格式）
         related = result.get("related_codes", "")
-        result["related_codes"] = [c.strip() for c in related.split(",") if c.strip()] if related else []
+        if isinstance(related, str) and related:
+            try:
+                parsed = json.loads(related)
+                if isinstance(parsed, list):
+                    result["related_codes"] = [str(c).strip() for c in parsed if str(c).strip()]
+                else:
+                    result["related_codes"] = [c.strip() for c in related.split(",") if c.strip()]
+            except (json.JSONDecodeError, TypeError):
+                result["related_codes"] = [c.strip() for c in related.split(",") if c.strip()]
+        elif isinstance(related, list):
+            result["related_codes"] = related
+        else:
+            result["related_codes"] = []
 
         return result
 

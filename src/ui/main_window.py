@@ -81,11 +81,29 @@ class DiagnoseWorker(QThread):
             self.error.emit(str(e))
 
 
+class _OllamaCheckWorker(QThread):
+    """后台检查 Ollama 可用性，避免阻塞主线程"""
+    result = pyqtSignal(bool, list)  # (is_available, models)
+
+    def __init__(self, llm):
+        super().__init__()
+        self.llm = llm
+
+    def run(self):
+        try:
+            available = self.llm.is_available()
+            models = self.llm.get_available_models() if available else []
+            self.result.emit(available, models)
+        except Exception:
+            self.result.emit(False, [])
+
+
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.engine = DiagnosticEngine()
         self.worker: Optional[DiagnoseWorker] = None
+        self._ollama_worker = None
         self._init_ui()
         self._check_database()
         self._check_ollama()
@@ -319,20 +337,29 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(self.OLLAMA_CHECK_DELAY, self._do_check_ollama)
 
     def _do_check_ollama(self):
-        try:
-            llm = self.engine.llm
-            if llm.is_available():
-                self._set_dot_status(self.ollama_dot, self.ollama_status_label, True, "AI Ready")
-                self._init_model_selector()
-            else:
-                self._set_dot_status(self.ollama_dot, self.ollama_status_label, False, "AI offline")
-        except Exception:
+        """后台线程检查 Ollama，不阻塞 UI"""
+        self._ollama_worker = _OllamaCheckWorker(self.engine.llm)
+        self._ollama_worker.result.connect(self._on_ollama_check_done)
+        self._ollama_worker.start()
+
+    def _on_ollama_check_done(self, available: bool, models: list):
+        if available:
+            self._set_dot_status(self.ollama_dot, self.ollama_status_label, True, "AI Ready")
+            self._init_model_selector_with(models)
+        else:
             self._set_dot_status(self.ollama_dot, self.ollama_status_label, False, "AI offline")
 
     def _init_model_selector(self):
-        """初始化模型选择器"""
+        """初始化模型选择器（从 LLM 获取模型列表）"""
         try:
             models = self.engine.llm.get_available_models()
+            self._init_model_selector_with(models)
+        except Exception:
+            pass
+
+    def _init_model_selector_with(self, models: list):
+        """用已有模型列表初始化模型选择器（避免重复网络请求）"""
+        try:
             current = self.engine.llm.model_name
 
             self.model_selector.blockSignals(True)

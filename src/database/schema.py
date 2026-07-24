@@ -43,21 +43,3 @@ CREATE_INDEX_CODE = "CREATE INDEX IF NOT EXISTS idx_code ON obd_codes(code)"
 CREATE_INDEX_SYSTEM = "CREATE INDEX IF NOT EXISTS idx_system ON obd_codes(system)"
 CREATE_INDEX_HISTORY_CODE = "CREATE INDEX IF NOT EXISTS idx_history_code ON diagnostic_history(code)"
 CREATE_INDEX_HISTORY_TIME = "CREATE INDEX IF NOT EXISTS idx_history_time ON diagnostic_history(created_at)"
-
-# 查询语句
-SQL_QUERY_BY_CODE = "SELECT * FROM obd_codes WHERE code = ?"
-SQL_SEARCH_CODES = """
-    SELECT code, description, system, severity
-    FROM obd_codes
-    WHERE code LIKE ? OR description LIKE ?
-    ORDER BY code
-    LIMIT 20
-"""
-SQL_GET_ALL_CODES = "SELECT code, description FROM obd_codes ORDER BY code"
-SQL_GET_COUNT = "SELECT COUNT(*) FROM obd_codes"
-SQL_GET_SYSTEM_STATS = """
-    SELECT system, COUNT(*) as count
-    FROM obd_codes
-    GROUP BY system
-    ORDER BY system
-"""

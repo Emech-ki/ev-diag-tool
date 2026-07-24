@@ -196,7 +196,8 @@ class ResultPanel(QWidget):
     def _on_anchor_clicked(self, url):
         """处理知识库中的可点击链接（如相关故障码）"""
         if url.scheme() == "dtc":
-            code = url.path().strip("/")
+            # QUrl 将 dtc://P0300 中的 P0300 解析为 host（且转为小写），path 为空
+            code = url.host().upper() if url.host() else url.path().strip("/")
             if code:
                 QTimer.singleShot(0, lambda c=code: self.diagnose_requested.emit(c))
 
@@ -249,11 +250,11 @@ class ResultPanel(QWidget):
         self._refresh_symptoms_display()
 
         if result.has_knowledge():
-            html = self._build_knowledge_html(result)
+            kb_html = self._build_knowledge_html(result)
         else:
-            html = self._build_not_found_html(result)
+            kb_html = self._build_not_found_html(result)
 
-        self.knowledge_browser.setHtml(html)
+        self.knowledge_browser.setHtml(kb_html)
 
         if result.has_ai():
             ai_html = self._build_ai_html(result)
@@ -271,11 +272,11 @@ class ResultPanel(QWidget):
         self._refresh_symptoms_display()
 
         if result.has_knowledge():
-            html = self._build_knowledge_html(result)
+            kb_html = self._build_knowledge_html(result)
         else:
-            html = self._build_not_found_html(result)
+            kb_html = self._build_not_found_html(result)
 
-        self.knowledge_browser.setHtml(html)
+        self.knowledge_browser.setHtml(kb_html)
 
         if result.ai_available:
             self._show_ai_loading()
@@ -290,11 +291,11 @@ class ResultPanel(QWidget):
         self._refresh_symptoms_display()
 
         if result.has_knowledge():
-            html = self._build_knowledge_html(result)
+            kb_html = self._build_knowledge_html(result)
         else:
-            html = self._build_not_found_html(result)
+            kb_html = self._build_not_found_html(result)
 
-        self.knowledge_browser.setHtml(html)
+        self.knowledge_browser.setHtml(kb_html)
 
     def append_ai_text(self, token: str):
         """追加 AI 流式 token 到 AI 浏览器"""
@@ -369,13 +370,14 @@ class ResultPanel(QWidget):
         severity = kb.get("severity", "medium")
         sev = SEVERITY_STYLES.get(severity, SEVERITY_STYLES["medium"])
 
-        desc = kb.get("description", "")
-        sys = self.kb.get_system_info(kb.get("system", ""))["name"]
+        desc = html.escape(kb.get("description", ""))
+        sys_info = self.kb.get_system_info(kb.get("system", ""))
+        sys_name = html.escape(sys_info.get("name", "未知") if isinstance(sys_info, dict) else "未知")
 
-        html = f"""
+        kb_html = f"""
         <div style="font-family: 'Microsoft YaHei UI', Consolas, sans-serif;">"""
 
-        html += f"""
+        kb_html += f"""
             <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 4px;">
                 <span style="font-family: Consolas; font-size: 32px; font-weight: bold; color: {TEXT_PRIMARY};">
                     {result.code}
@@ -392,8 +394,8 @@ class ResultPanel(QWidget):
             </div>
 
             <div style="display: flex; gap: 16px; font-size: 12px; color: {TEXT_SECONDARY}; margin-bottom: 16px;">
-                <span>系统: {sys}</span>
-                <span>类型: {kb.get('code_type', '通用')}</span>
+                <span>系统: {sys_name}</span>
+                <span>类型: {html.escape(kb.get('code_type', '通用'))}</span>
             </div>
 
             <div style="height: 1px; background-color: {CARD_BORDER}; margin-bottom: 14px;"></div>
@@ -401,10 +403,10 @@ class ResultPanel(QWidget):
 
         detail = kb.get("detail", "")
         if detail:
-            html += f"""
+            kb_html += f"""
             <div style="margin-bottom: 14px;">
                 <div style="font-size: 13px; font-weight: bold; color: {TEXT_PRIMARY}; margin-bottom: 6px;">详细说明</div>
-                <div style="font-size: 14px; color: {TEXT_SECONDARY}; line-height: 1.7;">{detail}</div>
+                <div style="font-size: 14px; color: {TEXT_SECONDARY}; line-height: 1.7;">{html.escape(detail)}</div>
             </div>
             <div style="height: 1px; background-color: {CARD_BORDER}; margin-bottom: 14px;"></div>
             """
@@ -417,10 +419,10 @@ class ResultPanel(QWidget):
                 causes = []
         if causes:
             items = "".join(
-                f'<li style="margin: 6px 0; padding-left: 4px; color: {TEXT_SECONDARY};">{c}</li>'
+                f'<li style="margin: 6px 0; padding-left: 4px; color: {TEXT_SECONDARY};">{html.escape(c)}</li>'
                 for c in causes
             )
-            html += f"""
+            kb_html += f"""
             <div style="margin-bottom: 14px;">
                 <div style="font-size: 13px; font-weight: bold; color: {TEXT_PRIMARY}; margin-bottom: 6px;">常见原因</div>
                 <ul style="margin: 0; padding-left: 20px;">{items}</ul>
@@ -434,15 +436,17 @@ class ResultPanel(QWidget):
                 steps = json.loads(steps)
             except (json.JSONDecodeError, TypeError):
                 steps = []
+        if steps:
             items = "".join(
-                f'<li style="margin: 8px 0; padding-left: 4px; color: {TEXT_SECONDARY}; line-height: 1.6;">{s}</li>'
+                f'<li style="margin: 8px 0; padding-left: 4px; color: {TEXT_SECONDARY}; line-height: 1.6;">{html.escape(s)}</li>'
                 for s in steps
             )
-            html += f"""
+            kb_html += f"""
             <div style="margin-bottom: 14px;">
                 <div style="font-size: 13px; font-weight: bold; color: {TEXT_PRIMARY}; margin-bottom: 6px;">诊断步骤</div>
                 <ol style="margin: 0; padding-left: 20px;">{items}</ol>
             </div>
+            <div style="height: 1px; background-color: {CARD_BORDER}; margin-bottom: 14px;"></div>
             """
 
         related = kb.get("related_codes", [])
@@ -455,7 +459,7 @@ class ResultPanel(QWidget):
                 f'font-family: Consolas; font-size: 12px; padding: 2px 10px; border-radius: 4px;">{r}</a>'
                 for r in related
             )
-            html += f"""
+            kb_html += f"""
             <div style="height: 1px; background-color: {CARD_BORDER}; margin-bottom: 10px;"></div>
             <div style="margin-bottom: 4px;">
                 <div style="font-size: 13px; font-weight: bold; color: {TEXT_PRIMARY}; margin-bottom: 6px;">相关故障码</div>
@@ -463,8 +467,8 @@ class ResultPanel(QWidget):
             </div>
             """
 
-        html += "</div>"
-        return html
+        kb_html += "</div>"
+        return kb_html
 
     def _build_not_found_html(self, result: DiagnosticResult) -> str:
         """构建未找到故障码的 HTML"""

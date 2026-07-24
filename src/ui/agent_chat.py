@@ -3,6 +3,9 @@ AI 诊断助手对话面板 (方案C)
 实现与 AI Agent 的对话式交互（流式响应）
 """
 
+import html as html_mod
+import re
+
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QTextBrowser, QLineEdit, QPushButton,
@@ -14,7 +17,9 @@ from PyQt6.QtGui import QTextCursor
 from src.engine.diagnostic import DiagnosticEngine, DiagnosticResult
 from src.ai.agent import DiagnosticAgent
 from src.ui.styles import PRIMARY, PRIMARY_DARK, PRIMARY_BG, CARD_BORDER, CARD_BG, TEXT_PRIMARY, TEXT_SECONDARY, TEXT_MUTED, BG, WARNING, WARNING_BG
-import re
+
+# 预编译正则
+_BOLD_RE = re.compile(r'\*\*(.*?)\*\*')
 
 
 class AgentStreamWorker(QThread):
@@ -48,6 +53,8 @@ class AgentChatPanel(QWidget):
             llm=engine.llm
         )
         self.worker = None
+        self._messages = []  # (role, content) 消息列表，用于可靠重建
+        self._stream_content = ""  # 流式消息缓冲区
         self._init_ui()
 
     def _init_ui(self):
@@ -165,12 +172,23 @@ class AgentChatPanel(QWidget):
 
     def _clear_display(self):
         self.chat_edit.clear()
+        self._messages.clear()
+        self._stream_content = ""
 
     def _append_html(self, html: str):
         cursor = self.chat_edit.textCursor()
         cursor.movePosition(QTextCursor.MoveOperation.End)
         cursor.insertHtml(html)
         self.chat_edit.ensureCursorVisible()
+
+    def _rebuild_display(self):
+        """从消息列表重建整个聊天显示"""
+        self.chat_edit.setUpdatesEnabled(False)
+        self.chat_edit.clear()
+        self._append_welcome()
+        for role, content in self._messages:
+            self._append_message_html(role, content)
+        self.chat_edit.setUpdatesEnabled(True)
 
     def _append_welcome(self):
         welcome = f"""
@@ -193,8 +211,15 @@ class AgentChatPanel(QWidget):
         self._append_html(welcome)
 
     def _append_message(self, role: str, content: str):
-        content = content.replace('\n', '<br>')
-        content = re.sub(r'\*\*(.*?)\*\*', r'<strong>\1</strong>', content)
+        """记录消息并渲染"""
+        self._messages.append((role, content))
+        self._append_message_html(role, content)
+
+    def _append_message_html(self, role: str, content: str):
+        """仅渲染消息到界面（不记录）"""
+        rendered = html_mod.escape(content)
+        rendered = rendered.replace('\n', '<br>')
+        rendered = _BOLD_RE.sub(r'<strong>\1</strong>', rendered)
 
         if role == "user":
             html = f"""
@@ -202,7 +227,7 @@ class AgentChatPanel(QWidget):
                 <div style="display: inline-block; background-color: {PRIMARY_BG};
                             color: {PRIMARY}; padding: 10px 16px; border-radius: 14px 14px 4px 14px;
                             max-width: 70%; text-align: left; font-size: 14px; line-height: 1.6;">
-                    {content}
+                    {rendered}
                 </div>
             </div>
             """
@@ -212,7 +237,7 @@ class AgentChatPanel(QWidget):
                 <div style="display: inline-block; background-color: #F5F5F5;
                             color: {TEXT_PRIMARY}; padding: 10px 16px; border-radius: 14px 14px 14px 4px;
                             max-width: 70%; text-align: left; font-size: 14px; line-height: 1.6;">
-                    {content}
+                    {rendered}
                 </div>
             </div>
             """
@@ -222,7 +247,7 @@ class AgentChatPanel(QWidget):
                 <div style="display: inline-block; background-color: {WARNING_BG};
                             color: {WARNING}; padding: 6px 12px; border-radius: 6px;
                             font-size: 12px;">
-                    {content}
+                    {rendered}
                 </div>
             </div>
             """
@@ -232,15 +257,14 @@ class AgentChatPanel(QWidget):
     def _start_stream_message(self):
         """开始流式消息"""
         self._stream_content = ""
-        self._stream_start_pos = self.chat_edit.textCursor().position()
 
     def _append_stream_token(self, token: str):
         """追加流式 token 到当前消息（直接追加文本，不重写 HTML）"""
         self._stream_content += token
 
         # 转义 HTML 特殊字符
-        escaped = token.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
-        escaped = re.sub(r'\*\*(.*?)\*\*', r'<strong>\1</strong>', escaped)
+        escaped = html_mod.escape(token)
+        escaped = _BOLD_RE.sub(r'<strong>\1</strong>', escaped)
         escaped = escaped.replace('\n', '<br>')
 
         cursor = self.chat_edit.textCursor()
@@ -249,28 +273,26 @@ class AgentChatPanel(QWidget):
         self.chat_edit.ensureCursorVisible()
 
     def _finalize_stream_message(self):
-        """流式完成后，用完整 HTML 替换（确保格式正确）"""
+        """流式完成后，记录消息并从列表重建整个聊天（确保格式正确）"""
         if not self._stream_content:
             return
-        escaped = self._stream_content.replace('<', '&lt;').replace('>', '&gt;')
-        escaped = re.sub(r'\*\*(.*?)\*\*', r'<strong>\1</strong>', escaped)
-        escaped = escaped.replace('\n', '<br>')
+        # 将流式内容记录到消息列表
+        self._messages.append(("assistant", self._stream_content))
+        # 从消息列表重建整个聊天显示
+        self._rebuild_display()
 
-        # 移动到流式消息起始位置，删除流式内容，插入最终格式化内容
-        cursor = self.chat_edit.textCursor()
-        cursor.movePosition(QTextCursor.MoveOperation.Start)
-        cursor.setPosition(self._stream_start_pos, QTextCursor.MoveMode.MoveAnchor)
-
-        html = f"""
-        <div style="margin: 8px 0;">
-            <div style="display: inline-block; background-color: #F5F5F5;
-                        color: {TEXT_PRIMARY}; padding: 10px 16px; border-radius: 14px 14px 14px 4px;
-                        max-width: 70%; text-align: left; font-size: 14px; line-height: 1.6;">
-                {escaped}
-            </div>
-        </div>
-        """
-        cursor.insertHtml(html)
+    def _stop_worker(self):
+        """安全停止当前 worker 线程"""
+        if self.worker is not None:
+            try:
+                self.worker.chunk.disconnect(self._on_stream_chunk)
+                self.worker.finished.disconnect(self._on_stream_finished)
+                self.worker.error.disconnect(self._on_agent_error)
+            except TypeError:
+                pass
+            if self.worker.isRunning():
+                self.worker.quit()
+                self.worker.wait(5000)
 
     def on_send_message(self):
         message = self.message_input.text().strip()
@@ -282,17 +304,7 @@ class AgentChatPanel(QWidget):
 
         self._set_input_enabled(False)
         self._start_stream_message()
-
-        if self.worker is not None:
-            try:
-                self.worker.chunk.disconnect(self._on_stream_chunk)
-                self.worker.finished.disconnect(self._on_stream_finished)
-                self.worker.error.disconnect(self._on_agent_error)
-            except TypeError:
-                pass
-            if self.worker.isRunning():
-                self.worker.quit()
-                self.worker.wait(1000)
+        self._stop_worker()
 
         self.worker = AgentStreamWorker(self.agent, message)
         self.worker.chunk.connect(self._on_stream_chunk)
@@ -308,6 +320,10 @@ class AgentChatPanel(QWidget):
         self._set_input_enabled(True)
 
     def _on_agent_error(self, error_msg: str):
+        # 记录部分流式内容到消息列表，避免重建时丢失
+        if self._stream_content:
+            self._messages.append(("assistant", self._stream_content))
+            self._stream_content = ""
         self._append_message("system", f"⚠️ 错误: {error_msg}")
         self._set_input_enabled(True)
 
@@ -332,11 +348,13 @@ class AgentChatPanel(QWidget):
                 msg += f"• 常见原因: {causes[0]}等\n"
             msg += "请帮我分析一下，看看从哪里开始排查比较好。"
 
+            self._stop_worker()  # 先停止旧 worker，再替换 session
             self.agent.start_diagnosis(result.code)
             self.message_input.setText(msg)
             self.on_send_message()
 
     def _on_new_diagnosis(self):
+        self._stop_worker()  # 先停止 worker，再重置 session
         self.agent.reset_session()
         self._clear_display()
         self._append_welcome()
@@ -357,6 +375,7 @@ class AgentChatPanel(QWidget):
             self._append_message("system", info)
 
     def _on_clear_chat(self):
+        self._stop_worker()  # 先停止 worker，再重置 session
         self.agent.reset_session()
         self._clear_display()
         self._append_welcome()

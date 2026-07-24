@@ -100,7 +100,7 @@ class DiagnosticAgent:
             # 将对话历史转换为 LLM 所需格式
             context = [
                 {"role": turn.role, "content": turn.content}
-                for turn in self.session.history[-10:]  # 最近10轮
+                for turn in self.session.history[-CONTEXT_WINDOW_SIZE:]
             ]
 
             # 添加当前诊断上下文
@@ -142,7 +142,7 @@ class DiagnosticAgent:
         try:
             context = [
                 {"role": turn.role, "content": turn.content}
-                for turn in self.session.history[-10:]
+                for turn in self.session.history[-CONTEXT_WINDOW_SIZE:]
             ]
 
             context_info = f"\n[当前诊断上下文]\n故障码: {self.session.code}\n"
