@@ -1,6 +1,6 @@
 """
 EV-Diag-Tool 版本信息
 """
-VERSION = "1.3.0"
-VERSION_NAME = "相关码跳转修复"
+VERSION = "2.1.0"
+VERSION_NAME = "本地/调用模型切换"
 VERSION_LINE = f"v{VERSION} — {VERSION_NAME}"

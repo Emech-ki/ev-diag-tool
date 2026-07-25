@@ -1,14 +1,53 @@
 """
-Main Window — v1.1.0 With Streaming + Model Selector + History
+Main Window — v2.0.0 With Multi-Provider + Vehicle Selector + Model Info
 """
 
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLineEdit, QPushButton, QLabel, QStatusBar, QMessageBox,
-    QTabWidget, QFrame, QComboBox
+    QTabWidget, QFrame, QComboBox, QMenu
 )
 from typing import Optional
-from PyQt6.QtCore import Qt, QTimer, QThread, pyqtSignal
+from PyQt6.QtCore import Qt, QTimer, QThread, pyqtSignal, QEvent, QObject
+from PyQt6.QtGui import QMouseEvent
+
+
+class _ViewRightClickFilter(QObject):
+    """拦截 QComboBox 弹出框 viewport 的右键事件"""
+
+    right_clicked = pyqtSignal(int)  # 发射被右键的行号
+
+    def eventFilter(self, obj, event):
+        if event.type() == QEvent.Type.MouseButtonPress and isinstance(event, QMouseEvent):
+            if event.button() == Qt.MouseButton.RightButton:
+                # obj 是 viewport，通过 parent() 获取 view
+                view = obj.parent()
+                if view and hasattr(view, 'indexAt'):
+                    index = view.indexAt(event.pos())
+                    if index.isValid():
+                        self.right_clicked.emit(index.row())
+                return True  # 阻止 view 处理（不会选中+关闭）
+        return super().eventFilter(obj, event)
+
+
+class _RightClickComboBox(QComboBox):
+    """支持右键弹出菜单的 QComboBox"""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._view_filter = _ViewRightClickFilter(self)
+
+    def showPopup(self):
+        super().showPopup()  # 先弹出，确保 view/viewport 已创建
+        # 将事件过滤器安装到 viewport（真正接收鼠标事件的 widget）
+        vp = self.view().viewport()
+        if vp:
+            vp.installEventFilter(self._view_filter)
+
+    @property
+    def view_right_clicked(self):
+        """返回 view 右键信号，外部可连接"""
+        return self._view_filter.right_clicked
 
 from src.engine.diagnostic import DiagnosticEngine, DiagnosticResult
 from src.ui.result_panel import ResultPanel
@@ -22,6 +61,8 @@ from src.ui.styles import (
 )
 
 from src.version import VERSION_LINE
+from src.config import AI_PROVIDER, append_endpoint_to_env, remove_endpoint_from_env
+from src.ui.add_endpoint_dialog import AddEndpointDialog
 
 
 class DiagnoseWorker(QThread):
@@ -81,8 +122,8 @@ class DiagnoseWorker(QThread):
             self.error.emit(str(e))
 
 
-class _OllamaCheckWorker(QThread):
-    """后台检查 Ollama 可用性，避免阻塞主线程"""
+class _AICheckWorker(QThread):
+    """后台检查 AI Provider 可用性，避免阻塞主线程"""
     result = pyqtSignal(bool, list)  # (is_available, models)
 
     def __init__(self, llm):
@@ -103,10 +144,11 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.engine = DiagnosticEngine()
         self.worker: Optional[DiagnoseWorker] = None
-        self._ollama_worker = None
+        self._ai_check_worker = None
         self._init_ui()
         self._check_database()
-        self._check_ollama()
+        self._check_ai()
+        self._load_vehicle_data()
 
     def _init_ui(self):
         self.setWindowTitle(f"EV-Diag-Tool {VERSION_LINE}")
@@ -136,12 +178,8 @@ class MainWindow(QMainWindow):
 
         brand_layout.addStretch()
 
-        # ── Model Selector ──
-        self.model_selector = QComboBox()
-        self.model_selector.setEditable(True)
-        self.model_selector.setMinimumWidth(160)
-        self.model_selector.setMaximumHeight(30)
-        self.model_selector.setStyleSheet(f"""
+        # ── Provider Selector (本地模型 / 调用模型) ──
+        brand_combo_style = f"""
             QComboBox {{
                 font-size: 12px; padding: 4px 8px;
                 background-color: rgba(255,255,255,0.15);
@@ -156,7 +194,25 @@ class MainWindow(QMainWindow):
                 background-color: white; color: {TEXT_PRIMARY};
                 border: 1px solid {CARD_BORDER}; selection-background-color: {PRIMARY_BG};
             }}
-        """)
+        """
+
+        self.provider_selector = _RightClickComboBox()
+        self.provider_selector.setMinimumWidth(120)
+        self.provider_selector.setMaximumHeight(30)
+        self.provider_selector.setStyleSheet(brand_combo_style)
+        self.provider_selector.currentTextChanged.connect(self._on_provider_changed)
+        self.provider_selector.view_right_clicked.connect(self._on_provider_view_right_click)
+        self.provider_selector.installEventFilter(self)
+        brand_layout.addWidget(self.provider_selector)
+
+        brand_layout.addSpacing(6)
+
+        # ── Model Selector ──
+        self.model_selector = QComboBox()
+        self.model_selector.setEditable(True)
+        self.model_selector.setMinimumWidth(160)
+        self.model_selector.setMaximumHeight(30)
+        self.model_selector.setStyleSheet(brand_combo_style)
         self.model_selector.currentTextChanged.connect(self._on_model_changed)
         brand_layout.addWidget(self.model_selector)
 
@@ -238,17 +294,33 @@ class MainWindow(QMainWindow):
         extra_row = QHBoxLayout()
         extra_row.setSpacing(8)
 
-        self.vehicle_input = QLineEdit()
-        self.vehicle_input.setPlaceholderText("车型（如：比亚迪秦PLUS EV 2023）")
-        self.vehicle_input.setStyleSheet(f"""
-            QLineEdit {{
+        combo_style = f"""
+            QComboBox {{
                 font-size: 13px; padding: 6px 10px;
                 border: 1px solid {CARD_BORDER}; border-radius: 8px;
                 background: white; min-height: 22px;
             }}
-            QLineEdit:focus {{ border-color: {PRIMARY}; }}
-        """)
-        extra_row.addWidget(self.vehicle_input, 1)
+            QComboBox:focus {{ border-color: {PRIMARY}; }}
+            QComboBox::drop-down {{ border: none; width: 20px; }}
+            QComboBox QAbstractItemView {{
+                background-color: white; color: {TEXT_PRIMARY};
+                border: 1px solid {CARD_BORDER}; selection-background-color: {PRIMARY_BG};
+            }}
+        """
+
+        self.make_selector = QComboBox()
+        self.make_selector.setPlaceholderText("品牌")
+        self.make_selector.setMinimumWidth(120)
+        self.make_selector.setStyleSheet(combo_style)
+        self.make_selector.currentTextChanged.connect(self._on_make_changed)
+        extra_row.addWidget(self.make_selector, 1)
+
+        self.model_selector_vehicle = QComboBox()
+        self.model_selector_vehicle.setPlaceholderText("车型")
+        self.model_selector_vehicle.setEditable(True)
+        self.model_selector_vehicle.setMinimumWidth(160)
+        self.model_selector_vehicle.setStyleSheet(combo_style)
+        extra_row.addWidget(self.model_selector_vehicle, 2)
 
         self.symptom_input = QLineEdit()
         self.symptom_input.setPlaceholderText("症状描述（如：冷车启动抖动）")
@@ -333,32 +405,217 @@ class MainWindow(QMainWindow):
 
     OLLAMA_CHECK_DELAY = 500
 
-    def _check_ollama(self):
-        QTimer.singleShot(self.OLLAMA_CHECK_DELAY, self._do_check_ollama)
+    def _check_ai(self):
+        """初始化 provider 选择器 + 检查 AI Provider"""
+        self._init_provider_selector()
+        QTimer.singleShot(self.OLLAMA_CHECK_DELAY, self._do_check_ai_async)
 
-    def _do_check_ollama(self):
-        """后台线程检查 Ollama，不阻塞 UI"""
-        self._ollama_worker = _OllamaCheckWorker(self.engine.llm)
-        self._ollama_worker.result.connect(self._on_ollama_check_done)
-        self._ollama_worker.start()
+    _ADD_ENDPOINT_TAG = "__add_endpoint__"
 
-    def _on_ollama_check_done(self, available: bool, models: list):
-        if available:
-            self._set_dot_status(self.ollama_dot, self.ollama_status_label, True, "AI Ready")
-            self._init_model_selector_with(models)
+    def _init_provider_selector(self):
+        """初始化 provider 下拉框：本地模型 + 已配置的远程端点 + 添加入口。
+        如果调用方已 blockSignals，会保持阻塞状态不被覆盖。"""
+        was_blocked = self.provider_selector.signalsBlocked()
+        self.provider_selector.blockSignals(True)
+        self.provider_selector.clear()
+        self.provider_selector.addItem("本地模型")
+
+        # 添加已配置的远程端点
+        endpoints = self.engine.llm.get_remote_endpoints()
+        for ep in endpoints:
+            self.provider_selector.addItem(ep["name"])
+
+        # 分隔线 + 添加入口
+        self.provider_selector.insertSeparator(self.provider_selector.count())
+        self.provider_selector.addItem("+ 添加模型...")
+        add_idx = self.provider_selector.count() - 1
+        self.provider_selector.setItemData(add_idx, self._ADD_ENDPOINT_TAG, Qt.ItemDataRole.UserRole)
+
+        # 如果配置了 AI_PROVIDER=openai 且有端点，默认选中第一个远程端点
+        from src.config import AI_PROVIDER
+        if AI_PROVIDER == "openai" and endpoints:
+            self.provider_selector.setCurrentIndex(1)  # 第一个远程端点
         else:
-            self._set_dot_status(self.ollama_dot, self.ollama_status_label, False, "AI offline")
+            self.provider_selector.setCurrentIndex(0)  # 本地模型
 
-    def _init_model_selector(self):
-        """初始化模型选择器（从 LLM 获取模型列表）"""
+        # 恢复调用方的阻塞状态（只有调用方未阻塞时才解除）
+        if not was_blocked:
+            self.provider_selector.blockSignals(False)
+
+    def _on_provider_changed(self, provider_text: str):
+        """Provider 切换回调"""
+        if not provider_text:
+            return
+
+        # 检查是否选中了"+ 添加模型..."
+        idx = self.provider_selector.currentIndex()
+        tag = self.provider_selector.itemData(idx, Qt.ItemDataRole.UserRole)
+        if tag == self._ADD_ENDPOINT_TAG:
+            self._show_add_endpoint_dialog()
+            return
+
+        if provider_text == "本地模型":
+            self.engine.llm.switch_to_local()
+            self._refresh_model_list()
+            self._set_dot_status(self.ollama_dot, self.ollama_status_label, False, "AI checking...")
+            QTimer.singleShot(300, self._do_check_ai_async)
+        else:
+            # 切换到远程端点
+            success = self.engine.llm.switch_to_remote(provider_text)
+            if success:
+                self._set_dot_status(self.ollama_dot, self.ollama_status_label, False, f"AI checking ({provider_text})...")
+                self._refresh_model_list()
+                self._do_check_ai_async()
+            else:
+                self.status_bar.showMessage(f"切换到 {provider_text} 失败")
+
+    def _show_add_endpoint_dialog(self):
+        """弹出添加远程端点对话框"""
+        # 记住当前选中项，取消时恢复
+        prev_index = self.provider_selector.currentIndex()
+        prev_text = self.provider_selector.currentText()
+
+        dialog = AddEndpointDialog(self)
+        if dialog.exec() == AddEndpointDialog.DialogCode.Accepted and dialog.get_result():
+            data = dialog.get_result()
+            try:
+                append_endpoint_to_env(
+                    name=data["name"],
+                    url=data["base_url"],
+                    key=data["api_key"],
+                    model=data["model_name"],
+                )
+                # 重新初始化 provider 选择器（会重新读取 .env 中的端点）
+                self._init_provider_selector()
+                # 选中新添加的端点（倒数第三项：...端点, 分隔线, +添加模型...）
+                new_count = self.provider_selector.count()
+                self.provider_selector.setCurrentIndex(new_count - 3)
+                self.status_bar.showMessage(f"已添加远程模型: {data['name']}")
+            except Exception as e:
+                QMessageBox.warning(self, "保存失败", f"写入 .env 文件失败:\n{e}")
+                self._init_provider_selector()
+                self.provider_selector.setCurrentIndex(prev_index)
+        else:
+            # 用户取消，用 blockSignals 恢复选中项，避免重入 _on_provider_changed
+            self.provider_selector.blockSignals(True)
+            self._init_provider_selector()
+            restore_idx = self.provider_selector.findText(prev_text)
+            if restore_idx >= 0:
+                self.provider_selector.setCurrentIndex(restore_idx)
+            else:
+                self.provider_selector.setCurrentIndex(0)
+            self.provider_selector.blockSignals(False)
+
+    # ── 右键删除远程端点 ──
+
+    def eventFilter(self, obj, event):
+        """拦截 Provider combo box 本体的右键事件（弹出框关闭状态）"""
+        if obj is self.provider_selector and event.type() == QEvent.Type.MouseButtonPress:
+            if isinstance(event, QMouseEvent) and event.button() == Qt.MouseButton.RightButton:
+                row = self.provider_selector.currentIndex()
+                if row >= 0:
+                    self._on_provider_right_click(row)
+                return True
+        return super().eventFilter(obj, event)
+
+    def _on_provider_view_right_click(self, row: int):
+        """弹出框列表中右键点击某项（由 _RightClickComboBox 信号触发）"""
+        self._on_provider_right_click(row)
+
+    def _on_provider_right_click(self, row: int):
+        """Provider 下拉框右键点击处理"""
+        # 获取该项的文本和标记
+        text = self.provider_selector.itemText(row)
+        tag = self.provider_selector.itemData(row, Qt.ItemDataRole.UserRole)
+
+        # 排除：本地模型、分隔线、"+ 添加模型..."
+        if text == "本地模型" or tag == self._ADD_ENDPOINT_TAG or not text:
+            return
+
+        menu = QMenu(self)
+        delete_action = menu.addAction(f"删除 \"{text}\"")
+        action = menu.exec(self.cursor().pos())
+
+        if action == delete_action:
+            self._delete_endpoint(text)
+
+    def _delete_endpoint(self, name: str):
+        """删除指定的远程端点"""
+        reply = QMessageBox.question(
+            self,
+            "确认删除",
+            f"确定要删除远程模型 \"{name}\" 吗？\n\n此操作将从配置中移除该端点。",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        try:
+            remove_endpoint_from_env(name)
+            # 刷新下拉框并切回本地模型
+            self._init_provider_selector()
+            self.provider_selector.setCurrentIndex(0)
+            # 切换 LLM provider 并刷新模型列表
+            self.engine.llm.switch_to_local()
+            self._refresh_model_list()
+            self.status_bar.showMessage(f"已删除远程模型: {name}")
+        except Exception as e:
+            QMessageBox.warning(self, "删除失败", f"删除端点失败:\n{e}")
+
+    def _refresh_model_list(self):
+        """刷新当前 provider 的模型列表"""
         try:
             models = self.engine.llm.get_available_models()
+            current = self.engine.llm.model_name
+
+            self.model_selector.blockSignals(True)
+            self.model_selector.clear()
+            self.model_selector.addItems(models)
+
+            idx = self.model_selector.findText(current)
+            if idx >= 0:
+                self.model_selector.setCurrentIndex(idx)
+            else:
+                self.model_selector.setEditText(current)
+
+            self.model_selector.blockSignals(False)
+
+            if not models:
+                name = self.engine.llm.current_endpoint_name
+                self.status_bar.showMessage(f"{name} 无可用模型 — 请检查服务是否启动")
+        except Exception as e:
+            name = self.engine.llm.current_endpoint_name
+            self.status_bar.showMessage(f"获取 {name} 模型列表失败: {e}")
+
+    def _do_check_ai_async(self):
+        """后台线程检查当前 AI Provider，不阻塞 UI"""
+        # 停止旧的检查 worker
+        if self._ai_check_worker is not None and self._ai_check_worker.isRunning():
+            self._ai_check_worker.result.disconnect(self._on_ai_check_done)
+            self._ai_check_worker.quit()
+            self._ai_check_worker.wait(500)
+
+        # 记录发起检查时的 provider，避免结果覆盖用户已切换的 provider
+        self._check_target = self.engine.llm.current_endpoint_name
+        self._ai_check_worker = _AICheckWorker(self.engine.llm)
+        self._ai_check_worker.result.connect(self._on_ai_check_done)
+        self._ai_check_worker.start()
+
+    def _on_ai_check_done(self, available: bool, models: list):
+        """AI Provider 检查完成回调（仅当 provider 未切换时应用结果）"""
+        current = self.engine.llm.current_endpoint_name
+        # 如果用户在检查期间切换了 provider，忽略此结果
+        if hasattr(self, '_check_target') and self._check_target != current:
+            return
+        if available:
+            self._set_dot_status(self.ollama_dot, self.ollama_status_label, True, f"AI Ready ({current})")
             self._init_model_selector_with(models)
-        except Exception:
-            pass
+        else:
+            self._set_dot_status(self.ollama_dot, self.ollama_status_label, False, f"AI offline ({current})")
 
     def _init_model_selector_with(self, models: list):
-        """用已有模型列表初始化模型选择器（避免重复网络请求）"""
+        """用已有模型列表初始化模型选择器"""
         try:
             current = self.engine.llm.model_name
 
@@ -381,9 +638,44 @@ class MainWindow(QMainWindow):
         if not model_name:
             return
         self.engine.llm.set_model(model_name)
-        # 重置可用性缓存，让下次诊断时重新检查
         self.engine.llm.reset_availability()
-        self.status_bar.showMessage(f"已切换模型: {model_name} — 下次诊断时生效")
+        name = self.engine.llm.current_endpoint_name
+        self.status_bar.showMessage(f"已切换模型: [{name}] {model_name} — 下次诊断时生效")
+
+    # ── Vehicle Selector ──
+
+    def _load_vehicle_data(self):
+        """加载车型数据到品牌/车型下拉框"""
+        try:
+            makes = self.engine.kb.get_vehicle_makes()
+            self.make_selector.clear()
+            self.make_selector.addItem("")  # 空选项
+            self.make_selector.addItems(makes)
+        except Exception:
+            pass
+
+    def _on_make_changed(self, make: str):
+        """品牌切换时更新车型列表"""
+        self.model_selector_vehicle.clear()
+        self.model_selector_vehicle.setEditText("")
+        if not make:
+            return
+        try:
+            models = self.engine.kb.get_models_by_make(make)
+            model_names = [m["model"] for m in models]
+            self.model_selector_vehicle.addItems(model_names)
+        except Exception:
+            pass
+
+    def _get_vehicle_info(self) -> str:
+        """获取当前选择的车型信息文本"""
+        make = self.make_selector.currentText().strip()
+        model = self.model_selector_vehicle.currentText().strip()
+        if make and model:
+            return f"{make} {model}"
+        elif model:
+            return model
+        return ""
 
     # ── Diagnosis ──
 
@@ -411,12 +703,14 @@ class MainWindow(QMainWindow):
                 pass
             if self.worker.isRunning():
                 self.worker.quit()
-                self.worker.wait(1000)
+                if not self.worker.wait(1000):
+                    self.worker.terminate()
+                    self.worker.wait(500)
 
         self.worker = DiagnoseWorker(
             engine=self.engine,
             code=code,
-            vehicle=self.vehicle_input.text().strip(),
+            vehicle=self._get_vehicle_info(),
             extra=self.symptom_input.text().strip()
         )
         self.worker.kb_ready.connect(self._on_kb_ready)
@@ -451,6 +745,10 @@ class MainWindow(QMainWindow):
             if self.worker.isRunning():
                 self.worker.quit()
                 self.worker.wait(500)
+
+        # 恢复按钮状态
+        self.search_btn.setEnabled(True)
+        self.search_btn.setText("诊断")
 
         self.code_input.setText(code)
         self.status_bar.showMessage(f"正在查询相关故障码 {code}...")
@@ -493,7 +791,7 @@ class MainWindow(QMainWindow):
     def _save_diagnosis_history(self, result: DiagnosticResult):
         """保存诊断记录到历史"""
         try:
-            vehicle = self.vehicle_input.text().strip()
+            vehicle = self._get_vehicle_info()
             symptom = self.symptom_input.text().strip()
             self.engine.kb.db.save_history(
                 code=result.code,

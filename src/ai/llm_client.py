@@ -1,106 +1,158 @@
 """
-LLM API 客户端
-负责与 Ollama 本地大模型通信，生成诊断建议
+LLM API 客户端（代理层）
+根据配置选择 Ollama 或 OpenAI 兼容 Provider，支持多端点切换
 """
 
-import json
-import time
 import threading
-import urllib.request
-import urllib.error
-from typing import Optional, Dict, Any, List
-from src.config import OLLAMA_BASE_URL, OLLAMA_MODEL_NAME
+from typing import Optional, Dict, Any, List, Iterator
+
+from src.config import (
+    AI_PROVIDER, OLLAMA_BASE_URL, OLLAMA_MODEL_NAME,
+    OPENAI_API_KEY, OPENAI_BASE_URL, OPENAI_MODEL_NAME,
+    AI_TEMPERATURE, AI_MAX_TOKENS, get_remote_endpoints
+)
+from src.ai.providers import LLMProvider, OllamaProvider, OpenAICompatProvider
 from src.ai.prompt_templates import PromptTemplates
 
-TEMPERATURE = 0.7
-MAX_TOKENS = 1024
-CHECK_TIMEOUT = 3
-REQUEST_TIMEOUT = 90
-MAX_RETRIES = 3
+
+def create_provider(provider_name: str = None, **kwargs) -> LLMProvider:
+    """
+    工厂函数：根据名称创建对应的 LLM Provider
+
+    Args:
+        provider_name: "ollama" 或 "openai"，默认从 config 读取
+        **kwargs: 传递给 provider 构造函数的额外参数
+
+    Returns:
+        LLMProvider 实例
+    """
+    name = (provider_name or AI_PROVIDER).lower().strip()
+
+    if name == "openai":
+        return OpenAICompatProvider(
+            api_key=kwargs.get("api_key"),
+            base_url=kwargs.get("base_url"),
+            model_name=kwargs.get("model_name"),
+        )
+    else:
+        # 默认 Ollama
+        return OllamaProvider(
+            model_name=kwargs.get("model_name"),
+            base_url=kwargs.get("base_url"),
+        )
 
 
 class LLMClient:
     """
-    LLM 客户端（Ollama）
-    调用本地部署的大模型生成诊断建议
+    LLM 客户端（代理）
+    委托给当前活跃的 LLMProvider，支持多端点管理
     """
 
     _instance = None
-    _init_lock = threading.Lock()
+    _instance_lock = threading.Lock()
 
     def __new__(cls, *args, **kwargs):
         if cls._instance is None:
-            with cls._init_lock:
+            with cls._instance_lock:
                 if cls._instance is None:
                     cls._instance = super().__new__(cls)
                     cls._instance._initialized = False
         return cls._instance
 
-    def __init__(self, model_name: str = None, base_url: str = None):
+    def __init__(self, provider: LLMProvider = None):
         if self._initialized:
             return
-
-        self.model_name = model_name or OLLAMA_MODEL_NAME
-        self.base_url = (base_url or OLLAMA_BASE_URL).rstrip("/")
-        self._available = None
-        self._avail_lock = threading.Lock()
+        self._provider = provider or create_provider()
+        self._provider_lock = threading.Lock()
         self.templates = PromptTemplates()
         self._initialized = True
 
-    def _check_availability(self) -> bool:
-        """检查 Ollama 服务是否可用"""
-        if self._available is not None:
-            return self._available
+    @property
+    def provider(self) -> LLMProvider:
+        """当前活跃的 provider（线程安全读取）"""
+        with self._provider_lock:
+            return self._provider
 
-        with self._avail_lock:
-            if self._available is not None:
-                return self._available
+    @property
+    def model_name(self) -> str:
+        return self._provider.model_name
 
-            try:
-                url = f"{self.base_url}/api/tags"
-                req = urllib.request.Request(url, method="GET")
-                with urllib.request.urlopen(req, timeout=CHECK_TIMEOUT) as response:
-                    data = json.loads(response.read().decode())
-                    models = [m["name"] for m in data.get("models", [])]
+    @model_name.setter
+    def model_name(self, name: str) -> None:
+        self._provider.model_name = name
 
-                    model_available = any(self.model_name in m for m in models)
-                    if not model_available:
-                        print(f"  ⚠️ 模型 '{self.model_name}' 未在 Ollama 中找到")
-                        print(f"  💡 可用模型: {models[:5]}")
-                        print(f"  💡 请运行: ollama pull {self.model_name}")
+    @property
+    def is_local(self) -> bool:
+        """当前是否使用本地模型"""
+        return self._provider.provider_name == "ollama"
 
-                    self._available = model_available
-                    return model_available
+    @property
+    def current_endpoint_name(self) -> str:
+        """当前端点显示名称"""
+        if self.is_local:
+            return "本地模型"
+        return getattr(self._provider, "_endpoint_name", "调用模型")
 
-            except Exception as e:
-                print(f"  ⚠️ Ollama 服务不可用: {e}")
-                print(f"  💡 请确保 Ollama 已启动: ollama serve")
-                self._available = False
-                return False
+    def get_remote_endpoints(self) -> List[Dict[str, Any]]:
+        """获取已配置的远程端点列表"""
+        return get_remote_endpoints()
+
+    def set_provider(self, provider: LLMProvider):
+        """切换 provider（线程安全）"""
+        with self._provider_lock:
+            self._provider = provider
+
+    def switch_provider(self, provider_name: str, **kwargs):
+        """按名称切换 provider（线程安全）"""
+        new_provider = create_provider(provider_name, **kwargs)
+        if "name" in kwargs:
+            new_provider._endpoint_name = kwargs["name"]
+        with self._provider_lock:
+            self._provider = new_provider
+
+    def switch_to_local(self):
+        """切换到本地 Ollama（线程安全）"""
+        with self._provider_lock:
+            self._provider = OllamaProvider(
+                model_name=OLLAMA_MODEL_NAME,
+                base_url=OLLAMA_BASE_URL,
+            )
+
+    def switch_to_remote(self, endpoint_name: str) -> bool:
+        """
+        切换到指定名称的远程端点（线程安全）
+
+        Args:
+            endpoint_name: 端点名称（如 "DeepSeek"）
+
+        Returns:
+            是否切换成功
+        """
+        endpoints = get_remote_endpoints()
+        for ep in endpoints:
+            if ep["name"].lower() == endpoint_name.lower():
+                provider = OpenAICompatProvider(
+                    api_key=ep["api_key"],
+                    base_url=ep["base_url"],
+                    model_name=ep["model_name"],
+                )
+                provider._endpoint_name = ep["name"]
+                with self._provider_lock:
+                    self._provider = provider
+                return True
+        return False
 
     def is_available(self) -> bool:
-        """Ollama 服务是否可用"""
-        return self._check_availability()
+        return self._provider.is_available()
 
     def get_available_models(self) -> List[str]:
-        """获取 Ollama 已安装的模型列表"""
-        try:
-            url = f"{self.base_url}/api/tags"
-            req = urllib.request.Request(url, method="GET")
-            with urllib.request.urlopen(req, timeout=CHECK_TIMEOUT) as response:
-                data = json.loads(response.read().decode())
-                return [m["name"] for m in data.get("models", [])]
-        except Exception:
-            return []
+        return self._provider.get_models()
 
     def reset_availability(self):
-        """重置可用性缓存，下次调用 is_available() 时重新检查"""
-        self._available = None
+        self._provider.reset_availability()
 
     def set_model(self, model_name: str):
-        """切换模型"""
-        self.model_name = model_name
-        self.reset_availability()
+        self._provider.model_name = model_name
 
     def get_diagnostic_suggestion(
         self,
@@ -109,22 +161,10 @@ class LLMClient:
         vehicle_info: str = "",
         additional_info: str = ""
     ) -> str:
-        """
-        获取 AI 诊断建议
+        """获取 AI 诊断建议"""
+        if not self._provider.is_available():
+            return "⚠️ AI 服务未启动，请检查后重试"
 
-        Args:
-            code: 故障码
-            knowledge: 知识库查询结果（可为 None）
-            vehicle_info: 车型信息
-            additional_info: 附加描述
-
-        Returns:
-            AI 生成的诊断建议文本
-        """
-        if not self._check_availability():
-            return "⚠️ Ollama 服务未启动，请检查后重试"
-
-        # 构建提示词
         prompt = self.templates.build_diagnostic_prompt(
             code=code,
             knowledge=knowledge,
@@ -132,10 +172,8 @@ class LLMClient:
             additional_info=additional_info
         )
 
-        # 调用 Ollama
         try:
-            response = self._call_ollama(prompt)
-            return response
+            return self._provider.generate(prompt, AI_TEMPERATURE, AI_MAX_TOKENS)
         except Exception as e:
             return f"⚠️ AI 诊断生成失败: {str(e)}"
 
@@ -145,21 +183,10 @@ class LLMClient:
         knowledge: Optional[Dict[str, Any]] = None,
         vehicle_info: str = "",
         additional_info: str = ""
-    ):
-        """
-        获取 AI 诊断建议（流式）
-
-        Args:
-            code: 故障码
-            knowledge: 知识库查询结果（可为 None）
-            vehicle_info: 车型信息
-            additional_info: 附加描述
-
-        Yields:
-            每个 token 文本
-        """
-        if not self._check_availability():
-            yield "⚠️ Ollama 服务未启动，请检查后重试"
+    ) -> Iterator[str]:
+        """获取 AI 诊断建议（流式）"""
+        if not self._provider.is_available():
+            yield "⚠️ AI 服务未启动，请检查后重试"
             return
 
         prompt = self.templates.build_diagnostic_prompt(
@@ -170,212 +197,50 @@ class LLMClient:
         )
 
         try:
-            yield from self._call_ollama_stream(prompt)
+            yield from self._provider.generate_stream(prompt, AI_TEMPERATURE, AI_MAX_TOKENS)
         except Exception as e:
             yield f"⚠️ AI 诊断生成失败: {str(e)}"
 
     def chat(self, message: str, context: Optional[List[Dict[str, str]]] = None) -> str:
-        """
-        与 AI Agent 对话
+        """与 AI Agent 对话"""
+        if not self._provider.is_available():
+            return "⚠️ AI 服务未启动"
 
-        Args:
-            message: 用户消息
-            context: 对话上下文历史
-
-        Returns:
-            AI 回复
-        """
-        if not self._check_availability():
-            return "⚠️ Ollama 服务未启动"
-
-        # 构建对话消息
         messages = list(context) if context else []
         messages.append({"role": "user", "content": message})
 
-        # 添加系统提示
-        system_prompt = self.templates.get_agent_system_prompt()
-        messages.insert(0, {"role": "system", "content": system_prompt})
+        # 仅在没有系统提示词时插入
+        if not messages or messages[0].get("role") != "system":
+            system_prompt = self.templates.get_agent_system_prompt()
+            messages.insert(0, {"role": "system", "content": system_prompt})
 
         try:
-            return self._call_ollama_chat(messages)
+            return self._provider.chat(messages, AI_TEMPERATURE, AI_MAX_TOKENS)
         except Exception as e:
             return f"⚠️ AI 回复生成失败: {str(e)}"
 
-    def chat_stream(self, message: str, context: Optional[List[Dict[str, str]]] = None):
-        """
-        与 AI Agent 对话（流式响应）
-
-        Args:
-            message: 用户消息
-            context: 对话上下文历史
-
-        Yields:
-            每个 token 文本
-        """
-        if not self._check_availability():
-            yield "⚠️ Ollama 服务未启动"
+    def chat_stream(self, message: str, context: Optional[List[Dict[str, str]]] = None) -> Iterator[str]:
+        """与 AI Agent 对话（流式响应）"""
+        if not self._provider.is_available():
+            yield "⚠️ AI 服务未启动"
             return
 
         messages = list(context) if context else []
         messages.append({"role": "user", "content": message})
 
-        system_prompt = self.templates.get_agent_system_prompt()
-        messages.insert(0, {"role": "system", "content": system_prompt})
+        # 仅在没有系统提示词时插入
+        if not messages or messages[0].get("role") != "system":
+            system_prompt = self.templates.get_agent_system_prompt()
+            messages.insert(0, {"role": "system", "content": system_prompt})
 
         try:
-            yield from self._call_ollama_chat_stream(messages)
+            yield from self._provider.chat_stream(messages, AI_TEMPERATURE, AI_MAX_TOKENS)
         except Exception as e:
             yield f"⚠️ AI 回复生成失败: {str(e)}"
 
-    @staticmethod
-    def _http_request(url: str, data: bytes, headers: dict, timeout: int = REQUEST_TIMEOUT, max_retries: int = MAX_RETRIES) -> dict:
-        """带重试的 HTTP POST 请求"""
-        last_error = None
-        for attempt in range(max_retries + 1):
-            try:
-                req = urllib.request.Request(url, data=data, headers=headers, method="POST")
-                with urllib.request.urlopen(req, timeout=timeout) as response:
-                    return json.loads(response.read().decode())
-            except (urllib.error.URLError, urllib.error.HTTPError, ConnectionError, TimeoutError) as e:
-                last_error = e
-                if attempt < max_retries:
-                    wait = 2 ** attempt
-                    print(f"  ⚠️ Ollama 请求失败 (尝试 {attempt + 1}/{max_retries + 1}): {e}，{wait}秒后重试")
-                    time.sleep(wait)
-        raise last_error
-
-    def _call_ollama(self, prompt: str) -> str:
-        """调用 Ollama API (非流式)"""
-        url = f"{self.base_url}/api/generate"
-        data = json.dumps({
-            "model": self.model_name,
-            "prompt": prompt,
-            "stream": False,
-            "options": {
-                "temperature": TEMPERATURE,
-                "num_predict": MAX_TOKENS
-            }
-        }).encode("utf-8")
-
-        result = self._http_request(
-            url, data,
-            headers={"Content-Type": "application/json"},
-        )
-        return result.get("response", "").strip()
-
-    def _call_ollama_stream(self, prompt: str):
-        """调用 Ollama API（流式生成）"""
-        url = f"{self.base_url}/api/generate"
-        data = json.dumps({
-            "model": self.model_name,
-            "prompt": prompt,
-            "stream": True,
-            "options": {
-                "temperature": TEMPERATURE,
-                "num_predict": MAX_TOKENS
-            }
-        }).encode("utf-8")
-
-        # 仅在连接建立阶段重试，流式开始后不再重试（避免重复内容）
-        response = None
-        last_error = None
-        for attempt in range(MAX_RETRIES + 1):
-            try:
-                req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"}, method="POST")
-                response = urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT)
-                break
-            except (urllib.error.URLError, urllib.error.HTTPError, ConnectionError, TimeoutError) as e:
-                last_error = e
-                if attempt < MAX_RETRIES:
-                    wait = 2 ** attempt
-                    print(f"  ⚠️ Ollama 流式连接失败 (尝试 {attempt + 1}/{MAX_RETRIES + 1}): {e}，{wait}秒后重试")
-                    time.sleep(wait)
-                else:
-                    raise last_error
-
-        try:
-            for line in response:
-                if not line:
-                    continue
-                try:
-                    chunk = json.loads(line.decode("utf-8"))
-                    token = chunk.get("response", "")
-                    if token:
-                        yield token
-                    if chunk.get("done", False):
-                        break
-                except json.JSONDecodeError:
-                    continue
-        finally:
-            response.close()
-
-    def _call_ollama_chat(self, messages: List[Dict[str, str]]) -> str:
-        """调用 Ollama Chat API"""
-        url = f"{self.base_url}/api/chat"
-        data = json.dumps({
-            "model": self.model_name,
-            "messages": messages,
-            "stream": False,
-            "options": {
-                "temperature": TEMPERATURE,
-                "num_predict": MAX_TOKENS
-            }
-        }).encode("utf-8")
-
-        result = self._http_request(
-            url, data,
-            headers={"Content-Type": "application/json"},
-        )
-        return result.get("message", {}).get("content", "").strip()
-
-    def _call_ollama_chat_stream(self, messages: List[Dict[str, str]]):
-        """调用 Ollama Chat API（流式）"""
-        url = f"{self.base_url}/api/chat"
-        data = json.dumps({
-            "model": self.model_name,
-            "messages": messages,
-            "stream": True,
-            "options": {
-                "temperature": TEMPERATURE,
-                "num_predict": MAX_TOKENS
-            }
-        }).encode("utf-8")
-
-        # 仅在连接建立阶段重试，流式开始后不再重试（避免重复内容）
-        response = None
-        last_error = None
-        for attempt in range(MAX_RETRIES + 1):
-            try:
-                req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"}, method="POST")
-                response = urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT)
-                break
-            except (urllib.error.URLError, urllib.error.HTTPError, ConnectionError, TimeoutError) as e:
-                last_error = e
-                if attempt < MAX_RETRIES:
-                    wait = 2 ** attempt
-                    print(f"  ⚠️ Ollama 流式连接失败 (尝试 {attempt + 1}/{MAX_RETRIES + 1}): {e}，{wait}秒后重试")
-                    time.sleep(wait)
-                else:
-                    raise last_error
-
-        try:
-            for line in response:
-                if not line:
-                    continue
-                try:
-                    chunk = json.loads(line.decode("utf-8"))
-                    token = chunk.get("message", {}).get("content", "")
-                    if token:
-                        yield token
-                    if chunk.get("done", False):
-                        break
-                except json.JSONDecodeError:
-                    continue
-        finally:
-            response.close()
-
 
 # 便捷函数
-def create_llm_client(model_name: str = None) -> LLMClient:
-    """创建 LLM 客户端实例，默认从 config 读取模型名"""
-    return LLMClient(model_name=model_name or OLLAMA_MODEL_NAME)
+def create_llm_client(provider_name: str = None, **kwargs) -> LLMClient:
+    """创建 LLM 客户端实例"""
+    provider = create_provider(provider_name, **kwargs)
+    return LLMClient(provider=provider)

@@ -138,7 +138,59 @@ class KnowledgeBase:
             "C": {"name": "底盘", "full_name": "Chassis (底盘系统)", "icon": "🔧"},
             "U": {"name": "网络", "full_name": "Network (网络通讯)", "icon": "📡"},
         }
+        # 新能源系统映射到 P 类
+        ev_systems = {"EV-BMS", "EV-MOTOR", "EV-OBC", "EV-DCDC", "EV-THERMAL", "EV-HV"}
+        if system_code in ev_systems:
+            return {"name": "新能源动力", "full_name": f"EV ({system_code})", "icon": "⚡"}
         first_letter = system_code[0].upper() if system_code else ""
         return system_map.get(first_letter, {"name": "未知", "full_name": "未知系统", "icon": "❓"})
+
+    # ── 车型数据库查询 ──
+
+    def get_vehicle_makes(self) -> List[str]:
+        """获取所有品牌列表"""
+        try:
+            rows = self.db.execute_query(
+                "SELECT DISTINCT make FROM vehicle_models ORDER BY make"
+            )
+            return [r["make"] for r in rows]
+        except Exception:
+            return []
+
+    def get_models_by_make(self, make: str) -> List[Dict[str, Any]]:
+        """获取指定品牌的所有车型"""
+        try:
+            rows = self.db.execute_query(
+                "SELECT model, year_start, year_end, powertrain FROM vehicle_models WHERE make = ? ORDER BY model",
+                (make,)
+            )
+            return rows
+        except Exception:
+            return []
+
+    def get_vehicle_info(self, make: str, model: str) -> Optional[Dict[str, Any]]:
+        """获取特定车型详细信息"""
+        try:
+            rows = self.db.execute_query(
+                "SELECT * FROM vehicle_models WHERE make = ? AND model = ?",
+                (make, model)
+            )
+            if not rows:
+                return None
+
+            result = dict(rows[0])
+            # 解析 JSON 字段
+            result["common_codes"] = self.db.parse_json_field(result.get("common_codes", "[]"))
+            result["known_issues"] = self.db.parse_json_field(result.get("known_issues", "[]"))
+            return result
+        except Exception:
+            return None
+
+    def get_common_codes_for_vehicle(self, make: str, model: str) -> List[str]:
+        """获取车型常见故障码列表"""
+        info = self.get_vehicle_info(make, model)
+        if info:
+            return info.get("common_codes", [])
+        return []
 
 

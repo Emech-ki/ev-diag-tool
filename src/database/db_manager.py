@@ -47,10 +47,15 @@ class DatabaseManager:
             CREATE_TABLE_HISTORY,
             CREATE_INDEX_HISTORY_CODE,
             CREATE_INDEX_HISTORY_TIME,
+            CREATE_TABLE_VEHICLE_MODELS,
+            CREATE_INDEX_VEHICLE_MAKE,
+            CREATE_INDEX_VEHICLE_MODEL,
         )
         conn = self.get_connection()
         try:
             cursor = conn.cursor()
+
+            # diagnostic_history 表
             cursor.execute(
                 "SELECT name FROM sqlite_master WHERE type='table' AND name='diagnostic_history'"
             )
@@ -58,7 +63,17 @@ class DatabaseManager:
                 conn.execute(CREATE_TABLE_HISTORY)
                 conn.execute(CREATE_INDEX_HISTORY_CODE)
                 conn.execute(CREATE_INDEX_HISTORY_TIME)
-                conn.commit()
+
+            # vehicle_models 表
+            cursor.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='vehicle_models'"
+            )
+            if cursor.fetchone() is None:
+                conn.execute(CREATE_TABLE_VEHICLE_MODELS)
+                conn.execute(CREATE_INDEX_VEHICLE_MAKE)
+                conn.execute(CREATE_INDEX_VEHICLE_MODEL)
+
+            conn.commit()
         finally:
             conn.close()
 
@@ -331,6 +346,25 @@ class DatabaseManager:
     def _escape_like(keyword: str) -> str:
         """转义 SQL LIKE 通配符 % 和 _，防止意外匹配"""
         return keyword.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+    def execute_query(self, sql: str, params: tuple = ()) -> List[Dict[str, Any]]:
+        """
+        执行通用查询语句
+
+        Args:
+            sql: SQL 查询语句
+            params: 查询参数
+
+        Returns:
+            查询结果列表
+        """
+        conn = self.get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(sql, params)
+            return [dict(row) for row in cursor.fetchall()]
+        finally:
+            conn.close()
 
     @staticmethod
     def parse_json_field(json_str: str) -> list:

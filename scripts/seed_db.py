@@ -23,7 +23,8 @@ DB_PATH = DATA_DIR / "obd_codes.db"
 sys.path.insert(0, str(PROJECT_ROOT))
 from src.database.schema import (
     CREATE_TABLE_OBD_CODES, CREATE_INDEX_CODE, CREATE_INDEX_SYSTEM,
-    CREATE_TABLE_HISTORY, CREATE_INDEX_HISTORY_CODE, CREATE_INDEX_HISTORY_TIME
+    CREATE_TABLE_HISTORY, CREATE_INDEX_HISTORY_CODE, CREATE_INDEX_HISTORY_TIME,
+    CREATE_TABLE_VEHICLE_MODELS, CREATE_INDEX_VEHICLE_MAKE, CREATE_INDEX_VEHICLE_MODEL
 )
 
 
@@ -41,6 +42,10 @@ def create_database():
     cursor.execute(CREATE_TABLE_HISTORY)
     cursor.execute(CREATE_INDEX_HISTORY_CODE)
     cursor.execute(CREATE_INDEX_HISTORY_TIME)
+
+    cursor.execute(CREATE_TABLE_VEHICLE_MODELS)
+    cursor.execute(CREATE_INDEX_VEHICLE_MAKE)
+    cursor.execute(CREATE_INDEX_VEHICLE_MODEL)
 
     conn.commit()
     conn.close()
@@ -72,11 +77,21 @@ def parse_json_field(value):
 
 def _open_csv(path: Path):
     """尝试多种编码打开 CSV 文件"""
+    last_handle = None
     for enc in ('utf-8-sig', 'gbk', 'latin-1'):
         try:
-            return open(str(path), 'r', encoding=enc)
+            f = open(str(path), 'r', encoding=enc)
+            # 测试读取一小段来验证编码
+            f.read(1024)
+            f.seek(0)
+            return f
         except UnicodeDecodeError:
+            if f:
+                f.close()
             continue
+    # 最终回退：容错模式
+    if last_handle:
+        last_handle.close()
     return open(str(path), 'r', encoding='utf-8-sig', errors='replace')
 
 
@@ -125,6 +140,60 @@ def import_csv_to_db(csv_path, conn):
     return count
 
 
+def import_vehicle_models(csv_path, conn):
+    """
+    将车型 CSV 文件导入 vehicle_models 表
+    返回导入的行数
+    """
+    if not csv_path.exists():
+        print(f"  [WARN] Vehicle models file not found: {csv_path}, skipping")
+        return 0
+
+    def _safe_int(val):
+        try:
+            return int(val) if val else None
+        except (ValueError, TypeError):
+            return None
+
+    count = 0
+    with _open_csv(csv_path) as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            make = row.get('make', '').strip()
+            model = row.get('model', '').strip()
+            if not make or not model:
+                continue
+
+            common_codes = parse_json_field(row.get('common_codes', '[]'))
+            known_issues = parse_json_field(row.get('known_issues', '[]'))
+
+            year_start = row.get('year_start', '').strip()
+            year_end = row.get('year_end', '').strip()
+
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT OR REPLACE INTO vehicle_models
+                    (make, model, year_start, year_end, powertrain, platform,
+                     battery_type, motor_type, common_codes, known_issues, notes)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                make,
+                model,
+                _safe_int(year_start),
+                _safe_int(year_end),
+                row.get('powertrain', 'BEV'),
+                row.get('platform', ''),
+                row.get('battery_type', ''),
+                row.get('motor_type', ''),
+                common_codes,
+                known_issues,
+                row.get('notes', '')
+            ))
+            count += 1
+
+    return count
+
+
 def main():
     parser = argparse.ArgumentParser(description="EV-Diag-Tool 数据库初始化工具")
     parser.add_argument("-f", "--force", action="store_true",
@@ -159,6 +228,7 @@ def main():
         ("B-codes (Body)", SEED_DIR / "b_codes.csv"),
         ("C-codes (Chassis)", SEED_DIR / "c_codes.csv"),
         ("U-codes (Network)", SEED_DIR / "u_codes.csv"),
+        ("EV-codes (New Energy)", SEED_DIR / "ev_codes.csv"),
     ]
 
     total_count = 0
@@ -167,6 +237,12 @@ def main():
         count = import_csv_to_db(path, conn)
         print(f"   [OK] Imported {count} records")
         total_count += count
+
+    # 导入车型数据
+    vehicle_csv = SEED_DIR / "vehicle_models.csv"
+    print(f"\n[IMPORT] Vehicle models...")
+    vehicle_count = import_vehicle_models(vehicle_csv, conn)
+    print(f"   [OK] Imported {vehicle_count} vehicle models")
 
     conn.commit()
     conn.close()

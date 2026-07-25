@@ -380,7 +380,7 @@ class ResultPanel(QWidget):
         kb_html += f"""
             <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 4px;">
                 <span style="font-family: Consolas; font-size: 32px; font-weight: bold; color: {TEXT_PRIMARY};">
-                    {result.code}
+                    {html.escape(result.code)}
                 </span>
                 <span style="background-color: {sev['bg']}; color: {sev['text']};
                              font-size: 12px; font-weight: bold; padding: 3px 10px;
@@ -477,7 +477,7 @@ class ResultPanel(QWidget):
                     font-family: 'Microsoft YaHei UI', sans-serif;">
             <div style="font-size: 48px; margin-bottom: 12px; color: {CARD_BORDER};">?</div>
             <div style="font-size: 20px; font-weight: bold; color: {TEXT_PRIMARY}; margin-bottom: 8px;">
-                未找到故障码 "{result.code}"
+                未找到故障码 "{html.escape(result.code)}"
             </div>
             <div style="font-size: 14px; color: {TEXT_SECONDARY};">
                 该故障码暂未收录到知识库中
@@ -500,7 +500,7 @@ class ResultPanel(QWidget):
         return f"""
         <div style="font-family: 'Microsoft YaHei UI', sans-serif;">
             <div style="color: {TEXT_SECONDARY}; font-size: 12px; margin-bottom: 12px;">
-                基于 {result.code} + 车型/症状信息生成
+                基于 {html.escape(result.code)} + 车型/症状信息生成
                 <span style="float: right;">{result.timestamp}</span>
             </div>
             <div style="color: {TEXT_PRIMARY}; line-height: 1.7; font-size: 14px;">

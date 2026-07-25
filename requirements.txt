@@ -7,9 +7,11 @@ PyQt6>=6.5.0              # 桌面 GUI 框架
 # === 数据库 ===
 # SQLite 内置支持，无需额外包
 
-# === AI / Ollama ===
-# Ollama 通过 HTTP API 调用，不需要额外 Python 包
-# 但需要安装 Ollama 桌面端: https://ollama.com/
+# === AI / LLM ===
+# Ollama 通过 HTTP API 调用，使用 urllib (标准库)
+# OpenAI 兼容 API 通过 urllib (标准库) 调用
+# 如需使用 requests 库可取消注释:
+# requests>=2.28.0        # HTTP 客户端 (可选)
 
 # === 配置 ===
 python-dotenv>=1.0.0      # .env 配置文件读取
