@@ -238,6 +238,37 @@ class LLMClient:
         except Exception as e:
             yield f"⚠️ AI 回复生成失败: {str(e)}"
 
+    def chat_with_tools(
+        self,
+        messages: List[Dict[str, Any]],
+        tools: List[dict],
+        temperature: float = None,
+        max_tokens: int = None,
+    ) -> Dict[str, Any]:
+        """
+        带工具调用的对话（代理到当前 provider）
+
+        Args:
+            messages: 对话历史
+            tools: OpenAI function calling 格式的工具定义
+            temperature: 温度参数
+            max_tokens: 最大 token 数
+
+        Returns:
+            {"content": "...", "tool_calls": [...]} 或 {"content": "..."}
+        """
+        if not self._provider.is_available():
+            return {"content": "⚠️ AI 服务未启动", "tool_calls": None}
+
+        try:
+            return self._provider.chat_with_tools(
+                messages, tools,
+                temperature or AI_TEMPERATURE,
+                max_tokens or AI_MAX_TOKENS,
+            )
+        except Exception as e:
+            return {"content": f"⚠️ AI 调用失败: {str(e)}", "tool_calls": None}
+
 
 # 便捷函数
 def create_llm_client(provider_name: str = None, **kwargs) -> LLMClient:

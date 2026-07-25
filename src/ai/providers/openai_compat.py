@@ -8,7 +8,7 @@ import time
 import threading
 import urllib.request
 import urllib.error
-from typing import Iterator, List, Dict, Optional
+from typing import Iterator, List, Dict, Optional, Any
 
 from src.ai.providers import LLMProvider
 from src.config import (
@@ -175,8 +175,77 @@ class OpenAICompatProvider(LLMProvider):
         finally:
             response.close()
 
+    def chat_with_tools(
+        self,
+        messages: List[Dict[str, Any]],
+        tools: List[dict],
+        temperature: float = None,
+        max_tokens: int = None,
+    ) -> Dict[str, Any]:
+        """
+        带工具调用的对话（OpenAI Function Calling）
+
+        请求体新增 "tools" 字段，LLM 可能返回：
+        - 普通文本回复: choices[0].message.content 有值，tool_calls 为空
+        - 工具调用请求: choices[0].message.tool_calls 有值
+
+        Args:
+            messages: 对话历史
+            tools: OpenAI function calling 格式的工具定义
+            temperature: 温度参数
+            max_tokens: 最大 token 数
+
+        Returns:
+            {"content": "...", "tool_calls": [...]} 或 {"content": "..."}
+        """
+        temperature = temperature if temperature is not None else AI_TEMPERATURE
+        max_tokens = max_tokens if max_tokens is not None else AI_MAX_TOKENS
+
+        url = f"{self._base_url}/chat/completions"
+        body = {
+            "model": self._model_name,
+            "messages": messages,
+            "stream": False,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+        }
+
+        # 只有传入了工具才加 tools 字段
+        if tools:
+            body["tools"] = tools
+
+        data = json.dumps(body).encode("utf-8")
+        result = self._http_request(url, data)
+
+        choices = result.get("choices", [])
+        if not choices:
+            return {"content": "", "tool_calls": None}
+
+        message = choices[0].get("message", {})
+        content = message.get("content") or ""
+        raw_tool_calls = message.get("tool_calls")
+
+        # 解析 tool_calls
+        tool_calls = None
+        if raw_tool_calls:
+            tool_calls = []
+            for tc in raw_tool_calls:
+                tool_calls.append({
+                    "id": tc.get("id", ""),
+                    "type": "function",
+                    "function": {
+                        "name": tc["function"]["name"],
+                        "arguments": tc["function"]["arguments"],
+                    },
+                })
+
+        return {
+            "content": content if content else None,
+            "tool_calls": tool_calls,
+        }
+
     def _http_request(self, url: str, data: bytes) -> dict:
-        """带重试的 HTTP POST 请求"""
+        """带重试的 HTTP POST 请求（4xx 客户端错误不重试）"""
         last_error = None
         for attempt in range(max(AI_MAX_RETRIES, 0) + 1):
             try:
@@ -185,7 +254,15 @@ class OpenAICompatProvider(LLMProvider):
                 req.add_header("Authorization", f"Bearer {self._api_key}")
                 with urllib.request.urlopen(req, timeout=AI_REQUEST_TIMEOUT) as response:
                     return json.loads(response.read().decode())
-            except (urllib.error.URLError, urllib.error.HTTPError, ConnectionError, TimeoutError) as e:
+            except urllib.error.HTTPError as e:
+                if 400 <= e.code < 500:
+                    raise
+                last_error = e
+                if attempt < AI_MAX_RETRIES:
+                    wait = 2 ** attempt
+                    print(f"  ⚠️ OpenAI API 请求失败 (尝试 {attempt + 1}/{AI_MAX_RETRIES + 1}): {e}，{wait}秒后重试")
+                    time.sleep(wait)
+            except (urllib.error.URLError, ConnectionError, TimeoutError) as e:
                 last_error = e
                 if attempt < AI_MAX_RETRIES:
                     wait = 2 ** attempt

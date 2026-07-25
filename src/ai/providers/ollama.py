@@ -8,7 +8,7 @@ import time
 import threading
 import urllib.request
 import urllib.error
-from typing import Iterator, List, Dict, Optional
+from typing import Iterator, List, Dict, Optional, Any
 
 from src.ai.providers import LLMProvider
 from src.config import (
@@ -189,15 +189,99 @@ class OllamaProvider(LLMProvider):
         finally:
             response.close()
 
+    def chat_with_tools(
+        self,
+        messages: List[Dict[str, Any]],
+        tools: List[dict],
+        temperature: float = None,
+        max_tokens: int = None,
+    ) -> Dict[str, Any]:
+        """
+        带工具调用的对话（Ollama Tool Calling）
+
+        Ollama 从 0.4.0+ 支持 /api/chat 的 tools 参数，
+        格式与 OpenAI function calling 兼容。
+
+        Args:
+            messages: 对话历史
+            tools: OpenAI function calling 格式的工具定义
+            temperature: 温度参数
+            max_tokens: 最大 token 数
+
+        Returns:
+            {"content": "...", "tool_calls": [...]} 或 {"content": "..."}
+        """
+        temperature = temperature if temperature is not None else AI_TEMPERATURE
+        max_tokens = max_tokens if max_tokens is not None else AI_MAX_TOKENS
+
+        url = f"{self._base_url}/api/chat"
+        body = {
+            "model": self._model_name,
+            "messages": messages,
+            "stream": False,
+            "options": {
+                "temperature": temperature,
+                "num_predict": max_tokens,
+            },
+        }
+
+        # 只有传入了工具才加 tools 字段
+        if tools:
+            body["tools"] = tools
+
+        data = json.dumps(body).encode("utf-8")
+        result = self._http_request(url, data)
+
+        message = result.get("message", {})
+        content = message.get("content") or ""
+        raw_tool_calls = message.get("tool_calls")
+
+        # 解析 Ollama 的 tool_calls 格式
+        # Ollama 返回: [{"function": {"name": "...", "arguments": {...}}}]
+        tool_calls = None
+        if raw_tool_calls:
+            tool_calls = []
+            for i, tc in enumerate(raw_tool_calls):
+                func = tc.get("function", {})
+                # Ollama 的 arguments 可能已经是 dict，需要转为 JSON 字符串
+                args = func.get("arguments", {})
+                if isinstance(args, dict):
+                    args_str = json.dumps(args, ensure_ascii=False)
+                else:
+                    args_str = str(args)
+
+                tool_calls.append({
+                    "id": f"call_{i}",
+                    "type": "function",
+                    "function": {
+                        "name": func.get("name", ""),
+                        "arguments": args_str,
+                    },
+                })
+
+        return {
+            "content": content if content else None,
+            "tool_calls": tool_calls,
+        }
+
     def _http_request(self, url: str, data: bytes) -> dict:
-        """带重试的 HTTP POST 请求"""
+        """带重试的 HTTP POST 请求（4xx 客户端错误不重试）"""
         last_error = None
         for attempt in range(max(AI_MAX_RETRIES, 0) + 1):
             try:
                 req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"}, method="POST")
                 with urllib.request.urlopen(req, timeout=AI_REQUEST_TIMEOUT) as response:
                     return json.loads(response.read().decode())
-            except (urllib.error.URLError, urllib.error.HTTPError, ConnectionError, TimeoutError) as e:
+            except urllib.error.HTTPError as e:
+                # 4xx 客户端错误（如 400 Bad Request）不重试，直接抛出
+                if 400 <= e.code < 500:
+                    raise
+                last_error = e
+                if attempt < AI_MAX_RETRIES:
+                    wait = 2 ** attempt
+                    print(f"  ⚠️ Ollama 请求失败 (尝试 {attempt + 1}/{AI_MAX_RETRIES + 1}): {e}，{wait}秒后重试")
+                    time.sleep(wait)
+            except (urllib.error.URLError, ConnectionError, TimeoutError) as e:
                 last_error = e
                 if attempt < AI_MAX_RETRIES:
                     wait = 2 ** attempt

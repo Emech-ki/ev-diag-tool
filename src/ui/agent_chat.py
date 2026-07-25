@@ -27,6 +27,8 @@ class AgentStreamWorker(QThread):
     chunk = pyqtSignal(str)
     finished = pyqtSignal()
     error = pyqtSignal(str)
+    tool_call_signal = pyqtSignal(str, str)    # (工具名, 参数描述)
+    tool_result_signal = pyqtSignal(str, str)  # (工具名, 结果摘要)
 
     def __init__(self, agent: DiagnosticAgent, message: str):
         super().__init__()
@@ -35,8 +37,20 @@ class AgentStreamWorker(QThread):
 
     def run(self):
         try:
-            for token in self.agent.chat_stream(self.message):
-                self.chunk.emit(token)
+            # 使用带工具调用的 Agent 循环
+            def on_tool_call(name, args):
+                args_desc = ", ".join(f"{k}={v}" for k, v in args.items())
+                self.tool_call_signal.emit(name, args_desc)
+
+            def on_tool_result(name, result):
+                self.tool_result_signal.emit(name, result)
+
+            result = self.agent.run(
+                self.message,
+                on_tool_call=on_tool_call,
+                on_tool_result=on_tool_result,
+            )
+            self.chunk.emit(result)
             self.finished.emit()
         except Exception as e:
             self.error.emit(str(e))
@@ -288,6 +302,8 @@ class AgentChatPanel(QWidget):
                 self.worker.chunk.disconnect(self._on_stream_chunk)
                 self.worker.finished.disconnect(self._on_stream_finished)
                 self.worker.error.disconnect(self._on_agent_error)
+                self.worker.tool_call_signal.disconnect(self._on_tool_call)
+                self.worker.tool_result_signal.disconnect(self._on_tool_result)
             except TypeError:
                 pass
             if self.worker.isRunning():
@@ -310,10 +326,34 @@ class AgentChatPanel(QWidget):
         self.worker.chunk.connect(self._on_stream_chunk)
         self.worker.finished.connect(self._on_stream_finished)
         self.worker.error.connect(self._on_agent_error)
+        self.worker.tool_call_signal.connect(self._on_tool_call)
+        self.worker.tool_result_signal.connect(self._on_tool_result)
         self.worker.start()
 
     def _on_stream_chunk(self, token: str):
         self._append_stream_token(token)
+
+    def _on_tool_call(self, tool_name: str, args_desc: str):
+        """工具调用时显示中间状态"""
+        tool_display = {
+            "lookup_code": "🔍 查询故障码",
+            "search_by_symptom": "🔎 按症状搜索",
+            "get_vehicle_info": "🚗 查询车型信息",
+            "get_related_codes": "🔗 查询关联故障码",
+            "get_diagnostic_steps": "📋 获取诊断步骤",
+            "get_wiring_info": "🔌 查询电路信息",
+            "record_symptom": "📝 记录症状",
+            "get_common_fixes": "🔧 查询修复方案",
+            "search_codes_by_system": "📂 按系统浏览",
+        }
+        display_name = tool_display.get(tool_name, f"🛠️ 调用 {tool_name}")
+        self._append_message("system", f"{display_name}: {args_desc}")
+
+    def _on_tool_result(self, tool_name: str, result_summary: str):
+        """工具返回结果时显示"""
+        # 截取第一行作为摘要
+        first_line = result_summary.split("\n")[0][:100]
+        self._append_message("system", f"✅ {tool_name} 查询完成")
 
     def _on_stream_finished(self):
         self._finalize_stream_message()

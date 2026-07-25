@@ -138,7 +138,7 @@ class DatabaseManager:
         搜索故障码（模糊匹配）
 
         Args:
-            keyword: 搜索关键词（匹配code或description）
+            keyword: 搜索关键词（匹配code、description、detail、symptoms）
             limit: 最大返回数量
 
         Returns:
@@ -151,10 +151,13 @@ class DatabaseManager:
             cursor.execute("""
                 SELECT code, description, system, severity
                 FROM obd_codes
-                WHERE code LIKE ? ESCAPE '\\' OR description LIKE ? ESCAPE '\\'
+                WHERE code LIKE ? ESCAPE '\\'
+                   OR description LIKE ? ESCAPE '\\'
+                   OR detail LIKE ? ESCAPE '\\'
+                   OR symptoms LIKE ? ESCAPE '\\'
                 ORDER BY code
                 LIMIT ?
-            """, (pattern, pattern, limit))
+            """, (pattern, pattern, pattern, pattern, limit))
             return [dict(row) for row in cursor.fetchall()]
         finally:
             conn.close()

@@ -4,7 +4,7 @@ LLM Provider 抽象层
 """
 
 from abc import ABC, abstractmethod
-from typing import Iterator, List, Dict, Optional
+from typing import Iterator, List, Dict, Optional, Any
 
 
 class LLMProvider(ABC):
@@ -38,6 +38,32 @@ class LLMProvider(ABC):
     @abstractmethod
     def chat_stream(self, messages: List[Dict[str, str]], temperature: float = 0.7, max_tokens: int = 1024) -> Iterator[str]:
         """多轮对话（流式）"""
+        ...
+
+    @abstractmethod
+    def chat_with_tools(
+        self,
+        messages: List[Dict[str, Any]],
+        tools: List[dict],
+        temperature: float = 0.7,
+        max_tokens: int = 2048,
+    ) -> Dict[str, Any]:
+        """
+        带工具调用的对话（Tool Calling）
+
+        Args:
+            messages: 对话历史，格式同 chat()
+            tools: OpenAI function calling 格式的工具定义列表
+            temperature: 温度参数
+            max_tokens: 最大 token 数
+
+        Returns:
+            dict: {
+                "content": str | None,       # LLM 的文本回复（可能为 None）
+                "tool_calls": list | None    # 工具调用请求列表（可能为 None）
+            }
+            当 tool_calls 为空/None 时，表示 LLM 给出最终回答
+        """
         ...
 
     @property

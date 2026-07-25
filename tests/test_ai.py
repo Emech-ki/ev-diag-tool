@@ -202,7 +202,9 @@ class TestAgent(unittest.TestCase):
         from src.ai.agent import DiagnosticAgent
 
         agent = DiagnosticAgent(kb=None, llm=None)
-        self.assertIsNone(agent.session)
+        self.assertIsNone(agent.session_code)
+        self.assertIsNone(agent.session_vehicle)
+        self.assertEqual(len(agent._history), 0)
 
     def test_agent_start_diagnosis(self):
         """测试开始诊断"""
@@ -211,7 +213,7 @@ class TestAgent(unittest.TestCase):
         agent = DiagnosticAgent(kb=None, llm=None)
         result = agent.start_diagnosis("P0300")
         self.assertEqual(result["code"], "P0300")
-        self.assertIsNotNone(agent.session)
+        self.assertEqual(agent.session_code, "P0300")
 
     def test_agent_reset_session(self):
         """测试重置会话"""
@@ -220,7 +222,8 @@ class TestAgent(unittest.TestCase):
         agent = DiagnosticAgent(kb=None, llm=None)
         agent.start_diagnosis("P0300")
         agent.reset_session()
-        self.assertIsNone(agent.session)
+        self.assertIsNone(agent.session_code)
+        self.assertIsNone(agent.session_vehicle)
 
     def test_agent_get_session_summary(self):
         """测试获取会话摘要"""
@@ -233,6 +236,162 @@ class TestAgent(unittest.TestCase):
         agent.start_diagnosis("P0300")
         summary = agent.get_session_summary()
         self.assertEqual(summary["code"], "P0300")
+
+    def test_agent_has_tools(self):
+        """测试 Agent 初始化后有工具注册"""
+        from src.ai.agent import DiagnosticAgent
+
+        agent = DiagnosticAgent(kb=None, llm=None)
+        tools = agent.tools.list_tools()
+        self.assertIn("lookup_code", tools)
+        self.assertIn("search_by_symptom", tools)
+        self.assertIn("get_vehicle_info", tools)
+        self.assertGreaterEqual(len(tools), 9)
+
+
+class TestToolRegistry(unittest.TestCase):
+    """工具注册表测试"""
+
+    def test_register_and_find(self):
+        """测试注册和查找工具"""
+        from src.ai.tools import Tool, ToolParam, ToolRegistry
+
+        registry = ToolRegistry()
+        tool = Tool(
+            name="test_tool",
+            description="测试工具",
+            parameters=[ToolParam(name="code", type="string", description="故障码")],
+            function=lambda code: f'{{"result": "{code}"}}',
+        )
+        registry.register(tool)
+
+        self.assertIn("test_tool", registry)
+        self.assertEqual(len(registry), 1)
+        self.assertIs(registry.get("test_tool"), tool)
+        self.assertIsNone(registry.get("nonexistent"))
+
+    def test_to_openai_schema(self):
+        """测试导出 OpenAI function calling 格式"""
+        from src.ai.tools import Tool, ToolParam
+
+        tool = Tool(
+            name="lookup_code",
+            description="查询故障码详情",
+            parameters=[
+                ToolParam(name="code", type="string", description="故障码如P0300", required=True),
+                ToolParam(name="verbose", type="boolean", description="是否详细", required=False),
+            ],
+            function=lambda code, verbose=False: "{}",
+        )
+        schema = tool.to_openai_schema()
+
+        self.assertEqual(schema["type"], "function")
+        self.assertEqual(schema["function"]["name"], "lookup_code")
+        self.assertIn("查询故障码", schema["function"]["description"])
+        self.assertIn("code", schema["function"]["parameters"]["properties"])
+        self.assertIn("code", schema["function"]["parameters"]["required"])
+        self.assertNotIn("verbose", schema["function"]["parameters"]["required"])
+
+    def test_execute_success(self):
+        """测试工具执行成功"""
+        from src.ai.tools import Tool, ToolParam, ToolRegistry
+        import json
+
+        registry = ToolRegistry()
+        registry.register(Tool(
+            name="echo",
+            description="回显",
+            parameters=[ToolParam(name="text", type="string", description="输入")],
+            function=lambda text: json.dumps({"echo": text}),
+        ))
+
+        result = registry.execute("echo", {"text": "hello"})
+        parsed = json.loads(result)
+        self.assertEqual(parsed["echo"], "hello")
+
+    def test_execute_unknown_tool(self):
+        """测试执行未知工具"""
+        from src.ai.tools import ToolRegistry
+        import json
+
+        registry = ToolRegistry()
+        result = registry.execute("nonexistent", {})
+        parsed = json.loads(result)
+        self.assertIn("error", parsed)
+
+    def test_execute_tool_error(self):
+        """测试工具执行出错"""
+        from src.ai.tools import Tool, ToolParam, ToolRegistry
+        import json
+
+        registry = ToolRegistry()
+        registry.register(Tool(
+            name="fail",
+            description="会失败的工具",
+            parameters=[],
+            function=lambda: 1 / 0,  # 除零错误
+        ))
+
+        result = registry.execute("fail", {})
+        parsed = json.loads(result)
+        self.assertIn("error", parsed)
+
+    def test_to_openai_format_multiple(self):
+        """测试多个工具导出"""
+        from src.ai.tools import Tool, ToolParam, ToolRegistry
+
+        registry = ToolRegistry()
+        for i in range(3):
+            registry.register(Tool(
+                name=f"tool_{i}",
+                description=f"工具{i}",
+                parameters=[],
+                function=lambda: "{}",
+            ))
+
+        format_list = registry.to_openai_format()
+        self.assertEqual(len(format_list), 3)
+        for item in format_list:
+            self.assertEqual(item["type"], "function")
+
+
+class TestDiagnosticTools(unittest.TestCase):
+    """诊断工具集测试"""
+
+    def test_all_tools_registered(self):
+        """测试所有 9 个工具都能注册"""
+        from src.ai.tools import ToolRegistry
+        from src.ai.diagnostic_tools import register_diagnostic_tools
+
+        registry = ToolRegistry()
+        register_diagnostic_tools(registry)
+
+        expected = [
+            "lookup_code", "search_by_symptom", "get_vehicle_info",
+            "get_related_codes", "get_diagnostic_steps", "get_wiring_info",
+            "record_symptom", "get_common_fixes", "search_codes_by_system",
+        ]
+        for name in expected:
+            self.assertIn(name, registry, f"工具 {name} 未注册")
+        self.assertEqual(len(registry), 9)
+
+    def test_tool_schemas_valid(self):
+        """测试所有工具的 schema 格式正确"""
+        from src.ai.tools import ToolRegistry
+        from src.ai.diagnostic_tools import register_diagnostic_tools
+        import json
+
+        registry = ToolRegistry()
+        register_diagnostic_tools(registry)
+
+        for tool in registry.to_openai_format():
+            self.assertEqual(tool["type"], "function")
+            func = tool["function"]
+            self.assertIn("name", func)
+            self.assertIn("description", func)
+            self.assertIn("parameters", func)
+            self.assertEqual(func["parameters"]["type"], "object")
+            self.assertIn("properties", func["parameters"])
 
 
 if __name__ == "__main__":

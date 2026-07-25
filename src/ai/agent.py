@@ -1,228 +1,460 @@
 """
-AI Agent 模块 (方案C)
-实现基于 MCP/A2A 架构的诊断 Agent
-支持对话式交互，引导技师逐步排查
+AI Agent 模块 — 阶段三：Tool Calling 版
+实现 ReAct (Reasoning + Acting) 循环：
+  用户消息 → LLM 思考 → 调用工具 → 获取结果 → 继续思考 → ... → 最终回答
+
+类比单片机的 main loop:
+  while(1) {
+      检查中断请求 (tool_calls)
+      如果有中断 → 调用处理函数 → 返回数据给 CPU
+      如果没有中断 → CPU 输出最终结果
+  }
 """
 
-from typing import Optional, Dict, Any, List
-from dataclasses import dataclass, field
-from datetime import datetime
+import json
+from typing import Optional, Dict, Any, List, Callable
 
 from src.engine.knowledge_base import KnowledgeBase
 from src.ai.llm_client import LLMClient
+from src.ai.tools import ToolRegistry
+from src.ai.diagnostic_tools import register_diagnostic_tools
+from src.ai.prompt_templates import PromptTemplates
 
 
-@dataclass
-class ConversationTurn:
-    """对话轮次"""
-    role: str       # "user" 或 "assistant"
-    content: str    # 消息内容
-    timestamp: str = field(default_factory=lambda: datetime.now().strftime("%H:%M:%S"))
-
-
-@dataclass
-class DiagnosticSession:
-    """诊断会话"""
-    code: str                       # 正在诊断的故障码
-    vehicle_info: str = ""          # 车型信息
-    context: Dict[str, Any] = field(default_factory=dict)  # 诊断上下文
-    history: List[ConversationTurn] = field(default_factory=list)  # 对话历史
-
-
-CONTEXT_WINDOW_SIZE = 10
+# Agent 单次对话最大工具调用轮数，防止无限循环
+MAX_TOOL_ROUNDS = 10
 
 
 class DiagnosticAgent:
     """
-    诊断 AI Agent
-    通过对话引导技师完成排查
+    诊断 AI Agent — 带工具调用能力
+
+    核心流程 (ReAct 模式):
+    1. 用户发送消息
+    2. Agent 将消息 + 工具定义发给 LLM
+    3. 如果 LLM 返回 tool_calls → 执行工具 → 结果追加到消息 → 回到步骤 2
+    4. 如果 LLM 返回纯文本 → 结束，返回给用户
+
+    这就是当前 AI Agent 的核心模式：
+    - OpenAI 的 Function Calling
+    - Claude 的 Tool Use
+    - Gemini 的 Function Calling
+    全部都是这个循环。
     """
 
-    def __init__(self, kb: Optional[KnowledgeBase] = None, llm: Optional[LLMClient] = None):
-        super().__init__()
+    def __init__(
+        self,
+        kb: Optional[KnowledgeBase] = None,
+        llm: Optional[LLMClient] = None,
+    ):
         self.kb = kb or KnowledgeBase()
         self.llm = llm or LLMClient()
-        self.session: Optional[DiagnosticSession] = None
+        self.templates = PromptTemplates()
+
+        # 初始化工具注册表，注册所有诊断工具
+        self.tools = ToolRegistry()
+        register_diagnostic_tools(self.tools, self.kb)
+
+        # 会话状态
+        self.session_code: Optional[str] = None
+        self.session_vehicle: Optional[str] = None
+        self._history: List[Dict[str, Any]] = []
 
     def start_diagnosis(self, code: str, vehicle_info: str = "") -> Dict[str, Any]:
         """
-        开始新的诊断会话
+        开始新的诊断会话（保留旧接口兼容）
 
         Args:
             code: 故障码
             vehicle_info: 车型信息
 
         Returns:
-            包含知识库信息和 AI 初始建议的字典
+            包含知识库信息的字典
         """
         code = code.strip().upper()
+        self.session_code = code
+        self.session_vehicle = vehicle_info
+        self._history.clear()
 
         knowledge = self.kb.lookup(code)
 
-        self.session = DiagnosticSession(
-            code=code,
-            vehicle_info=vehicle_info,
-            context={"knowledge": knowledge}
-        )
-
-        result = {
+        return {
             "code": code,
             "knowledge": knowledge,
-            "message": self._build_initial_message(knowledge),
-            "session_started": True
+            "session_started": True,
         }
 
-        self.session.history.append(ConversationTurn(
-            role="assistant",
-            content=result["message"]
-        ))
+    def run(
+        self,
+        user_message: str,
+        on_tool_call: Optional[Callable[[str, dict], None]] = None,
+        on_tool_result: Optional[Callable[[str, str], None]] = None,
+    ) -> str:
+        """
+        Agent 主循环 — ReAct 模式
 
-        return result
+        这是整个 Agent 的核心。流程：
+        ┌─────────────────────────────────────────────┐
+        │  用户消息                                     │
+        │      ↓                                       │
+        │  LLM 思考（带工具定义）                         │
+        │      ↓                                       │
+        │  ┌─ 有 tool_calls? ── 是 → 执行工具 → 结果    │
+        │  │                      ↓                    │
+        │  │                  追加到消息历史              │
+        │  │                      ↓                    │
+        │  └────────────── 回到 LLM 思考                │
+        │      ↓                                       │
+        │  否 → 返回最终文本回答                          │
+        └─────────────────────────────────────────────┘
+
+        Args:
+            user_message: 用户输入
+            on_tool_call: 回调函数，工具调用时通知 UI (工具名, 参数)
+            on_tool_result: 回调函数，工具返回时通知 UI (工具名, 结果摘要)
+
+        Returns:
+            Agent 的最终回答文本
+        """
+        # 构建消息上下文
+        messages = self._build_messages(user_message)
+
+        # 先尝试 Tool Calling 模式
+        # 只有返回了真正的 tool_calls（不是文本中的 JSON）才走 ReAct 循环
+        try:
+            test_response = self.llm.chat_with_tools(
+                messages=messages[:],  # 用副本测试
+                tools=self.tools.to_openai_format(),
+            )
+            # 关键判断：必须有真正的 tool_calls，不能只是 content
+            # LLM 有时会在 content 中输出 JSON 格式的"伪工具调用"，那不是真正的 function calling
+            if test_response.get("tool_calls"):
+                return self._run_react_loop(messages, user_message, on_tool_call, on_tool_result, test_response)
+        except Exception:
+            pass
+
+        # 降级模式：预先查询数据，注入上下文，用普通 chat
+        # 包括两种情况：
+        # 1. chat_with_tools 抛异常（不支持 tool calling）
+        # 2. chat_with_tools 返回 content 但没有 tool_calls（LLM 没真正调用工具）
+        return self._run_with_prefetch(user_message, on_tool_call, on_tool_result)
+
+    def _run_react_loop(
+        self,
+        messages: list,
+        user_message: str,
+        on_tool_call: Optional[Callable],
+        on_tool_result: Optional[Callable],
+        first_response: dict,
+    ) -> str:
+        """
+        ReAct 循环（Tool Calling 可用时的完整模式）
+        """
+        response = first_response
+        called_tools = set()  # 记录已调用的 (name, args_key)，防止重复调用
+
+        for round_num in range(MAX_TOOL_ROUNDS):
+
+            content = response.get("content")
+            tool_calls = response.get("tool_calls")
+
+            # 2. 如果没有工具调用 → LLM 给出最终回答 → 结束
+            if not tool_calls:
+                final_answer = content or ""
+                # 记录到历史
+                self._history.append({"role": "user", "content": user_message})
+                self._history.append({"role": "assistant", "content": final_answer})
+                return final_answer
+
+            # 3. LLM 想调用工具 → 执行工具
+            # 注意：不把 tool_calls 字段加入消息历史，
+            # 因为 Ollama 不支持消息历史中的 tool_calls 字段（会返回 400）
+            # 只保留 assistant 的文本内容 + tool 结果
+            assistant_msg = {"role": "assistant", "content": content or ""}
+            messages.append(assistant_msg)
+
+            # 4. 逐个执行工具，结果追加到消息
+            any_new_call = False
+            for tc in tool_calls:
+                tc_id = tc.get("id", "")
+                func = tc.get("function", {})
+                tool_name = func.get("name", "")
+                tool_args_str = func.get("arguments", "{}")
+
+                # 解析参数
+                try:
+                    tool_args = json.loads(tool_args_str) if isinstance(tool_args_str, str) else tool_args_str
+                except json.JSONDecodeError:
+                    tool_args = {}
+
+                # 去重检查：防止 LLM 重复调用同一个工具
+                call_key = f"{tool_name}:{json.dumps(tool_args, sort_keys=True)}"
+                if call_key in called_tools:
+                    # 已经调用过了，注入提示让 LLM 给出最终回答
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": tc_id,
+                        "content": json.dumps({
+                            "notice": f"你已经调用过 {tool_name}，结果在上面。请基于已有数据给出最终诊断分析，不要再调用工具。",
+                        }, ensure_ascii=False),
+                    })
+                    any_new_call = True
+                    continue
+
+                called_tools.add(call_key)
+                any_new_call = True
+
+                # 通知 UI：正在调用工具
+                if on_tool_call:
+                    on_tool_call(tool_name, tool_args)
+
+                # 执行工具
+                result_str = self.tools.execute(tool_name, tool_args)
+
+                # 通知 UI：工具返回结果
+                if on_tool_result:
+                    summary = result_str[:200] + "..." if len(result_str) > 200 else result_str
+                    on_tool_result(tool_name, summary)
+
+                # 把工具结果追加到消息（tool role）
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": tc_id,
+                    "content": result_str,
+                })
+
+            # 如果本轮所有工具都是重复的，强制让 LLM 给出最终回答
+            if not any_new_call:
+                break
+
+        # 如果循环次数用尽，用普通 chat 做总结（不再调用工具）
+        summary_prompt = "请基于以上所有工具查询的结果，给出最终的诊断分析和建议。"
+        try:
+            answer = self.llm.chat(message=summary_prompt, context=messages)
+        except Exception:
+            answer = "⚠️ 诊断轮次过多，请基于当前信息手动分析。"
+        self._history.append({"role": "user", "content": user_message})
+        self._history.append({"role": "assistant", "content": answer})
+        return answer
+
+    def _run_with_prefetch(
+        self,
+        user_message: str,
+        on_tool_call: Optional[Callable] = None,
+        on_tool_result: Optional[Callable] = None,
+    ) -> str:
+        """
+        降级模式：预先查询数据，注入上下文，用普通 chat
+
+        当 LLM/Provider 不支持 Tool Calling 时（如旧版 Ollama），
+        Agent 自动根据用户消息判断需要哪些工具，预先执行，
+        把结果作为上下文注入到 prompt 中，然后用普通 chat 调用。
+
+        这样即使没有原生 Tool Calling，Agent 也能利用知识库数据。
+        """
+        # 根据用户消息智能预查询
+        prefetch_data = self._prefetch_tools(user_message, on_tool_call, on_tool_result)
+
+        # 把预查询结果注入到用户消息中
+        if prefetch_data:
+            context_text = (
+                "\n\n[以下是从知识库自动查询到的相关数据，请基于这些数据分析并回答用户问题]\n"
+                "注意：这些是知识库中的真实数据，请直接引用分析，不要说\"未收录\"。\n\n"
+                + prefetch_data
+            )
+            enhanced_message = user_message + context_text
+        else:
+            enhanced_message = user_message + "\n\n[知识库中未找到直接相关的数据，请基于通用知识给出建议]"
+
+        # 构建消息（用普通 chat 系统提示词）
+        messages = []
+        system_prompt = self.templates.get_agent_system_prompt()
+        messages.append({"role": "system", "content": system_prompt})
+
+        if self.session_code:
+            ctx = f"\n[当前诊断上下文]\n故障码: {self.session_code}"
+            if self.session_vehicle:
+                ctx += f"\n车型: {self.session_vehicle}"
+            enhanced_message = ctx + f"\n\n技师提问: {enhanced_message}"
+
+        # 调用普通 chat
+        # 如果没有预查询数据，额外提醒 LLM 不要编造
+        if not prefetch_data:
+            enhanced_message += (
+                "\n\n重要提示：知识库中没有找到相关的故障码数据。"
+                "请直接告知用户'知识库未收录此信息'，"
+                "建议用户使用原厂诊断仪读取或提供更多症状描述。"
+                "不要编造故障码含义或诊断建议。"
+            )
+
+        response = self.llm.chat(message=enhanced_message, context=messages)
+
+        self._history.append({"role": "user", "content": user_message})
+        self._history.append({"role": "assistant", "content": response})
+        return response
+
+    def _prefetch_tools(
+        self,
+        user_message: str,
+        on_tool_call: Optional[Callable] = None,
+        on_tool_result: Optional[Callable] = None,
+    ) -> str:
+        """
+        根据用户消息，自动判断并执行可能需要的工具
+        返回所有工具结果的拼接文本
+        """
+        import re
+
+        results = []
+        msg_upper = user_message.upper()
+
+        # 1. 检测故障码（如 P0300、B1420、EV-BMS-001）
+        code_pattern = r'\b([PBCUEV][\w-]{3,15})\b'
+        codes = re.findall(code_pattern, msg_upper)
+
+        for code in codes:
+            code = code.strip()
+            if len(code) >= 4:  # 至少 4 字符才认为是有效故障码
+                if on_tool_call:
+                    on_tool_call("lookup_code", {"code": code})
+                result = self.tools.execute("lookup_code", {"code": code})
+                if on_tool_result:
+                    on_tool_result("lookup_code", result[:200])
+                results.append(f"## 故障码 {code} 信息\n{result}")
+
+                # 同时查关联码
+                related = self.tools.execute("get_related_codes", {"code": code})
+                results.append(f"## {code} 关联故障码\n{related}")
+
+        # 2. 检测车型关键词
+        makes = ["比亚迪", "特斯拉", "蔚来", "小鹏", "理想", "广汽", "吉利",
+                 "BYD", "TESLA", "NIO", "XPENG", "LI"]
+        for make in makes:
+            if make in user_message or make.upper() in msg_upper:
+                # 尝试提取车型
+                model = self._extract_model(user_message, make)
+                if model:
+                    if on_tool_call:
+                        on_tool_call("get_vehicle_info", {"make": make, "model": model})
+                    result = self.tools.execute("get_vehicle_info", {"make": make, "model": model})
+                    if on_tool_result:
+                        on_tool_result("get_vehicle_info", result[:200])
+                    results.append(f"## 车型信息 {make} {model}\n{result}")
+                break
+
+        # 3. 检测症状关键词
+        symptom_keywords = [
+            ("抖动", "缺火"),          # "抖动"→搜"缺火"（技术术语，匹配 P0300）
+            ("异响", "异响"),
+            ("无法充电", "无法充电"),
+            ("充电中断", "充电"),
+            ("动力不足", "动力不足"),
+            ("无法启动", "无法启动"),
+            ("熄火", "熄火"),
+            ("漏电", "漏电"),
+            ("过热", "过热"),
+            ("冒烟", "冒烟"),
+            ("异味", "异味"),
+            ("故障灯", "故障灯"),
+            ("加速无力", "加速无力"),
+            ("刹车", "刹车"),
+            ("转向", "转向"),
+        ]
+        for simple_kw, search_kw in symptom_keywords:
+            if simple_kw in user_message:
+                if on_tool_call:
+                    on_tool_call("search_by_symptom", {"keyword": search_kw})
+                result = self.tools.execute("search_by_symptom", {"keyword": search_kw})
+                if on_tool_result:
+                    on_tool_result("search_by_symptom", result[:200])
+                results.append(f"## 症状搜索: {search_kw}\n{result}")
+                break  # 只搜第一个匹配的症状词
+
+        return "\n\n".join(results)
+
+    @staticmethod
+    def _extract_model(text: str, make: str) -> str:
+        """从文本中提取车型名"""
+        # 简单的车型提取：品牌后面跟着的词
+        models_map = {
+            "比亚迪": ["秦", "汉", "唐", "宋", "海豚", "海鸥", "元", "护卫舰", "驱逐舰"],
+            "特斯拉": ["Model 3", "Model Y", "Model S", "Model X"],
+            "蔚来": ["ES6", "ES8", "ET5", "ET7", "EC6"],
+            "小鹏": ["P7", "G6", "G9", "P5"],
+            "理想": ["L7", "L8", "L9"],
+            "BYD": ["Qin", "Han", "Tang", "Song", "Dolphin"],
+            "TESLA": ["Model 3", "Model Y", "Model S", "Model X"],
+        }
+        models = models_map.get(make, [])
+        for model in models:
+            if model in text:
+                return model
+        return ""
 
     def chat(self, message: str) -> str:
         """
-        与 Agent 对话
-
-        Args:
-            message: 技师的消息
-
-        Returns:
-            Agent 的回复
+        与 Agent 对话（兼容旧接口，内部调用 run）
         """
-        if not self.session:
-            return "请先输入故障码开始诊断。"
-
-        # 记录用户消息
-        self.session.history.append(ConversationTurn(role="user", content=message))
-
-        # 构建 AI 回复
-        try:
-            # 将对话历史转换为 LLM 所需格式
-            context = [
-                {"role": turn.role, "content": turn.content}
-                for turn in self.session.history[-CONTEXT_WINDOW_SIZE:]
-            ]
-
-            # 添加当前诊断上下文
-            context_info = f"\n[当前诊断上下文]\n故障码: {self.session.code}\n"
-            if self.session.vehicle_info:
-                context_info += f"车型: {self.session.vehicle_info}\n"
-
-            # 调用 LLM
-            response = self.llm.chat(
-                message=f"{context_info}\n\n技师提问: {message}",
-                context=context
-            )
-
-            # 记录回复
-            self.session.history.append(ConversationTurn(role="assistant", content=response))
-            return response
-
-        except Exception as e:
-            error_msg = f"抱歉，AI 回复时遇到问题: {str(e)}。请重试。"
-            self.session.history.append(ConversationTurn(role="assistant", content=error_msg))
-            return error_msg
+        return self.run(message)
 
     def chat_stream(self, message: str):
         """
-        与 Agent 对话（流式响应）
-
-        Args:
-            message: 技师的消息
-
-        Yields:
-            每个 token 文本
+        流式对话（兼容旧接口）
+        注意：Tool Calling 版本暂时用非流式实现，
+        因为流式 + tool_calls 的处理比较复杂。
+        后续可优化为流式版本。
         """
-        if not self.session:
-            yield "请先输入故障码开始诊断。"
-            return
-
-        self.session.history.append(ConversationTurn(role="user", content=message))
-
-        try:
-            context = [
-                {"role": turn.role, "content": turn.content}
-                for turn in self.session.history[-CONTEXT_WINDOW_SIZE:]
-            ]
-
-            context_info = f"\n[当前诊断上下文]\n故障码: {self.session.code}\n"
-            if self.session.vehicle_info:
-                context_info += f"车型: {self.session.vehicle_info}\n"
-
-            full_response = []
-            for token in self.llm.chat_stream(
-                message=f"{context_info}\n\n技师提问: {message}",
-                context=context
-            ):
-                full_response.append(token)
-                yield token
-
-            self.session.history.append(ConversationTurn(role="assistant", content="".join(full_response)))
-
-        except Exception as e:
-            error_msg = f"抱歉，AI 回复时遇到问题: {str(e)}。请重试。"
-            self.session.history.append(ConversationTurn(role="assistant", content=error_msg))
-            yield error_msg
+        yield self.run(message)
 
     def reset_session(self):
         """重置当前诊断会话"""
-        self.session = None
+        self.session_code = None
+        self.session_vehicle = None
+        self._history.clear()
 
     def get_session_summary(self) -> Dict[str, Any]:
         """获取当前会话摘要"""
-        if not self.session:
+        if not self.session_code and not self._history:
             return {"status": "no_active_session"}
 
         return {
-            "code": self.session.code,
-            "vehicle_info": self.session.vehicle_info,
-            "turns": len(self.session.history),
-            "knowledge_found": self.session.context.get("knowledge") is not None
+            "code": self.session_code or "无",
+            "vehicle_info": self.session_vehicle or "无",
+            "turns": len([h for h in self._history if h["role"] == "user"]),
+            "knowledge_found": self.kb.lookup(self.session_code) is not None if self.session_code else False,
+            "tools_available": len(self.tools),
         }
 
-    def _build_initial_message(self, knowledge: Optional[Dict[str, Any]]) -> str:
-        """构建诊断开始时的初始消息"""
-        if not knowledge:
-            return (
-                f"⚠️ 在知识库中未找到故障码 {self.session.code} 的信息。\n\n"
-                f"但我仍然可以帮你分析。请告诉我以下信息：\n"
-                f"1. 车辆出现了什么症状？\n"
-                f"2. 故障灯是常亮还是闪烁？\n"
-                f"3. 车辆行驶里程是多少？"
-            )
+    def _build_messages(self, user_message: str) -> List[Dict[str, Any]]:
+        """
+        构建发送给 LLM 的消息列表
 
-        # 构建结构化回复
-        msg = f"✅ 已查到故障码 {self.session.code} 的信息。\n\n"
-        msg += f"**{knowledge.get('description', '')}**\n\n"
+        包含：
+        1. 系统提示词（告诉 LLM 它有工具可用）
+        2. 诊断上下文（当前故障码、车型）
+        3. 用户消息
+        """
+        messages = []
 
-        # 严重程度
-        severity = knowledge.get('severity', 'medium')
-        severity_icons = {"low": "ℹ️", "medium": "⚠️", "high": "🔴", "critical": "🚨"}
-        msg += f"{severity_icons.get(severity, '⚠️')} 严重程度: {severity.upper()}\n\n"
+        # 系统提示词 — 工具感知版本
+        system_prompt = self.templates.get_tool_agent_system_prompt()
+        messages.append({"role": "system", "content": system_prompt})
 
-        # 常见原因概览
-        causes = knowledge.get('common_causes', [])
-        if causes:
-            msg += "**可能的原因（按常见程度排序）：**\n"
-            for i, cause in enumerate(causes[:5], 1):
-                msg += f"{i}. {cause}\n"
-            if len(causes) > 5:
-                msg += f"   ...以及 {len(causes)-5} 个其他可能原因\n"
+        # 如果有活跃的诊断会话，添加上下文
+        if self.session_code:
+            context = f"\n[当前诊断上下文]\n故障码: {self.session_code}"
+            if self.session_vehicle:
+                context += f"\n车型: {self.session_vehicle}"
+            user_message = context + f"\n\n技师提问: {user_message}"
 
-        # 开始引导
-        msg += (
-            "\n---\n"
-            "🎯 **开始排查前，我想先了解几个情况：**\n\n"
-            "1. 这个故障码是**第一次出现**还是**反复出现**？\n"
-            "2. 车辆最近有没有做过维修或保养？\n"
-            "3. 除了故障码，你观察到了什么症状？\n\n"
-            "请告诉我，我帮你制定排查计划。"
-        )
-
-        return msg
+        messages.append({"role": "user", "content": user_message})
+        return messages
 
 
 # 便捷函数
-def create_agent(kb: Optional[KnowledgeBase] = None, llm: Optional[LLMClient] = None) -> DiagnosticAgent:
+def create_agent(
+    kb: Optional[KnowledgeBase] = None,
+    llm: Optional[LLMClient] = None,
+) -> DiagnosticAgent:
     """创建诊断 Agent"""
     return DiagnosticAgent(kb=kb, llm=llm)
