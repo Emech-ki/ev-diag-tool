@@ -649,7 +649,6 @@ class MainWindow(QMainWindow):
         try:
             makes = self.engine.kb.get_vehicle_makes()
             self.make_selector.clear()
-            self.make_selector.addItem("")  # 空选项
             self.make_selector.addItems(makes)
         except Exception:
             pass
