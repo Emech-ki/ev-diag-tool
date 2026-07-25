@@ -5,10 +5,48 @@
 **Repo:** https://github.com/Emech-ki/ev-diag-tool.git
 **Version:** v3.0.0 — AI Agent (Tool Calling)
 **Tests:** 85 passed (unit) + 41 passed (verification)
+**Database:** 8729 fault codes + 45 vehicle models
 
 ---
 
 ## 本次会话完成的工作
+
+### 数据库大扩充（2026-07-25）
+
+#### 1. 从开源数据库抓取标准故障码
+- **来源:** [Wal33D/dtc-database](https://github.com/Wal33D/dtc-database) (GitHub 开源)
+- **抓取脚本:** `scripts/merge_official_codes.py`
+- **数据量:** 从 ~200 条扩充至 **8729 条**
+
+| 类别 | 数量 | 说明 |
+|------|------|------|
+| P-codes (动力总成) | 6553 | 标准英文 + 部分中文详细 |
+| U-codes (网络通讯) | 1231 | 标准英文 + 部分中文详细 |
+| C-codes (底盘) | 525 | 标准英文 + 部分中文详细 |
+| B-codes (车身) | 360 | 标准英文 + 部分中文详细 |
+| EV-codes (新能源) | 60 | 中文详细 |
+| 车型数据 | 45 | 国内主流新能源品牌 |
+
+#### 2. 新增车型数据
+新增 12 个品牌：长安深蓝、阿维塔、岚图、昊铂、小米、极狐、smart 等
+
+#### 3. 故障码描述翻译
+- **翻译脚本:** `scripts/translate_codes_v2.py`
+- **当前状态:** 约 8.9% 完全中文，91% 中英混合
+- **待办:** 翻译质量需进一步优化
+
+#### 4. Bug 修复
+- **品牌选择栏空选项** — `main_window.py` 移除 `addItem("")` 空选项
+
+#### 5. 打包 exe
+- **输出:** `dist/EV-Diag-Tool.exe` (37.6 MB)
+- **工具:** PyInstaller 6.21.0
+
+#### 6. Git 提交
+- **Commit:** `eb30494` — "feat: 扩充故障码数据库至 8729 条 + 修复品牌选择栏"
+- **Push:** 待手动执行 `git push origin master`
+
+---
 
 ### 阶段三：AI Agent 版（v3.0.0）
 
@@ -84,7 +122,8 @@
 - **版本：** v3.0.0 — AI Agent (Tool Calling)
 - **阶段：** 阶段三完成 — Tool Calling + ReAct 循环 + 降级模式
 - **测试：** 85 单元测试 + 41 功能验证，全部通过
-- **已修复问题：** 28 项（10 code review + 9 debug + 4 第三方模型 UI + 5 Agent）
+- **数据库：** 8729 故障码 + 45 车型
+- **已修复问题：** 29 项（10 code review + 9 debug + 4 第三方模型 UI + 5 Agent + 1 品牌选择栏）
 
 ## 核心架构
 
@@ -105,12 +144,12 @@
 
 ## 建议的下一步工作
 
-1. **编辑端点功能** — 右键菜单增加"编辑"
-2. **数据扩充** — EV 专属码（45 条）和车型数据（30 款）需运行 `python scripts/seed_db.py` 导入
-3. **打包 exe** — PyInstaller 打包
-4. **流式 Tool Calling** — 当前 `chat_stream` 用非流式实现，可优化
-5. **多 Agent 协作** — 主 Agent + 专家子 Agent（BMS/电机/热管理）
-6. **UI 优化** — Markdown 渲染增强、诊断结果导出
+1. **翻译优化** — 故障码描述翻译质量需提升（当前 8.9% 完全中文）
+2. **编辑端点功能** — 右键菜单增加"编辑"
+3. **流式 Tool Calling** — 当前 `chat_stream` 用非流式实现，可优化
+4. **多 Agent 协作** — 主 Agent + 专家子 Agent（BMS/电机/热管理）
+5. **UI 优化** — Markdown 渲染增强、诊断结果导出
+6. **Git Push** — 手动执行 `git push origin master`
 
 ---
 
