@@ -4,7 +4,23 @@ LLM Provider 抽象层
 """
 
 from abc import ABC, abstractmethod
+from dataclasses import dataclass, field
 from typing import Iterator, List, Dict, Optional, Any
+
+
+@dataclass
+class StreamEvent:
+    """
+    流式事件 — 用于流式 Tool Calling 的统一事件类型
+
+    类比硬件中断:
+      type="content"    → 数据就绪中断（收到一个 token）
+      type="tool_calls" → 外设请求中断（LLM 想调用工具）
+      type="done"       → 传输完成中断（本轮结束）
+    """
+    type: str                               # "content" | "tool_calls" | "done"
+    content: str = ""                       # 文本 token（type="content" 时）
+    tool_calls: List[Dict[str, Any]] = field(default_factory=list)  # 工具调用列表
 
 
 class LLMProvider(ABC):
@@ -66,6 +82,31 @@ class LLMProvider(ABC):
         """
         ...
 
+    def chat_with_tools_stream(
+        self,
+        messages: List[Dict[str, Any]],
+        tools: List[dict],
+        temperature: float = 0.7,
+        max_tokens: int = 2048,
+    ) -> Iterator[StreamEvent]:
+        """
+        带工具调用的流式对话（默认实现：回退到非流式）
+
+        子类可覆盖此方法提供真正的流式实现。
+        默认实现调用非流式 chat_with_tools 然后包装为 StreamEvent。
+
+        Yields:
+            StreamEvent: content → tool_calls → done
+        """
+        result = self.chat_with_tools(messages, tools, temperature, max_tokens)
+        content = result.get("content")
+        tool_calls = result.get("tool_calls")
+        if content:
+            yield StreamEvent("content", content=content)
+        if tool_calls:
+            yield StreamEvent("tool_calls", tool_calls=tool_calls)
+        yield StreamEvent("done")
+
     @property
     @abstractmethod
     def provider_name(self) -> str:
@@ -88,4 +129,4 @@ class LLMProvider(ABC):
 from src.ai.providers.ollama import OllamaProvider
 from src.ai.providers.openai_compat import OpenAICompatProvider
 
-__all__ = ["LLMProvider", "OllamaProvider", "OpenAICompatProvider"]
+__all__ = ["LLMProvider", "StreamEvent", "OllamaProvider", "OpenAICompatProvider"]

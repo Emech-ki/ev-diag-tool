@@ -10,7 +10,7 @@ import urllib.request
 import urllib.error
 from typing import Iterator, List, Dict, Optional, Any
 
-from src.ai.providers import LLMProvider
+from src.ai.providers import LLMProvider, StreamEvent
 from src.config import (
     OLLAMA_BASE_URL, OLLAMA_MODEL_NAME,
     AI_TEMPERATURE, AI_MAX_TOKENS,
@@ -263,6 +263,84 @@ class OllamaProvider(LLMProvider):
             "content": content if content else None,
             "tool_calls": tool_calls,
         }
+
+    def chat_with_tools_stream(
+        self,
+        messages: List[Dict[str, Any]],
+        tools: List[dict],
+        temperature: float = None,
+        max_tokens: int = None,
+    ) -> Iterator[StreamEvent]:
+        """
+        带工具调用的流式对话（Ollama）
+
+        Ollama 流式模式下，tool_calls 在单个 chunk 中完整返回（非增量）。
+        实现逻辑：
+        1. 发送 stream=True + tools 请求
+        2. 逐 chunk 读取，yield content tokens
+        3. 如果 chunk 包含 tool_calls，yield tool_calls 事件
+        4. done 时结束
+        """
+        temperature = temperature if temperature is not None else AI_TEMPERATURE
+        max_tokens = max_tokens if max_tokens is not None else AI_MAX_TOKENS
+
+        url = f"{self._base_url}/api/chat"
+        body = {
+            "model": self._model_name,
+            "messages": messages,
+            "stream": True,
+            "options": {
+                "temperature": temperature,
+                "num_predict": max_tokens,
+            },
+        }
+        if tools:
+            body["tools"] = tools
+
+        data = json.dumps(body).encode("utf-8")
+        response = self._open_stream(url, data)
+        try:
+            for line in response:
+                if not line:
+                    continue
+                try:
+                    chunk = json.loads(line.decode("utf-8"))
+                    message = chunk.get("message", {})
+
+                    # content 先于 tool_calls yield（保持 content→tool_calls→done 协议顺序）
+                    content = message.get("content", "")
+                    if content:
+                        yield StreamEvent("content", content=content)
+
+                    # 检查是否有 tool_calls
+                    raw_tool_calls = message.get("tool_calls")
+                    if raw_tool_calls:
+                        parsed_calls = []
+                        for i, tc in enumerate(raw_tool_calls):
+                            func = tc.get("function", {})
+                            args = func.get("arguments", {})
+                            if isinstance(args, dict):
+                                args_str = json.dumps(args, ensure_ascii=False)
+                            else:
+                                args_str = str(args)
+                            parsed_calls.append({
+                                "id": f"call_{i}",
+                                "type": "function",
+                                "function": {
+                                    "name": func.get("name", ""),
+                                    "arguments": args_str,
+                                },
+                            })
+                        yield StreamEvent("tool_calls", tool_calls=parsed_calls)
+
+                    if chunk.get("done", False):
+                        break
+                except json.JSONDecodeError:
+                    continue
+        finally:
+            response.close()
+
+        yield StreamEvent("done")
 
     def _http_request(self, url: str, data: bytes) -> dict:
         """带重试的 HTTP POST 请求（4xx 客户端错误不重试）"""

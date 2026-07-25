@@ -10,7 +10,7 @@ import urllib.request
 import urllib.error
 from typing import Iterator, List, Dict, Optional, Any
 
-from src.ai.providers import LLMProvider
+from src.ai.providers import LLMProvider, StreamEvent
 from src.config import (
     OPENAI_API_KEY, OPENAI_BASE_URL, OPENAI_MODEL_NAME,
     AI_TEMPERATURE, AI_MAX_TOKENS,
@@ -243,6 +243,128 @@ class OpenAICompatProvider(LLMProvider):
             "content": content if content else None,
             "tool_calls": tool_calls,
         }
+
+    def chat_with_tools_stream(
+        self,
+        messages: List[Dict[str, Any]],
+        tools: List[dict],
+        temperature: float = None,
+        max_tokens: int = None,
+    ) -> Iterator[StreamEvent]:
+        """
+        带工具调用的流式对话（OpenAI 兼容 API）
+
+        OpenAI 流式格式中，tool_calls 以增量片段出现：
+          delta.tool_calls[0].function.name   → 第一个 tool_call 的名称
+          delta.tool_calls[0].function.arguments → 逐片段拼接参数 JSON
+
+        实现逻辑：
+        1. 发送 stream=True + tools 请求
+        2. 逐 SSE 行解析
+        3. delta 有 content → yield content token
+        4. delta 有 tool_calls → 按 index 缓冲 name + arguments
+        5. 流结束时，yield 缓冲好的完整 tool_calls
+        """
+        temperature = temperature if temperature is not None else AI_TEMPERATURE
+        max_tokens = max_tokens if max_tokens is not None else AI_MAX_TOKENS
+
+        url = f"{self._base_url}/chat/completions"
+        body = {
+            "model": self._model_name,
+            "messages": messages,
+            "stream": True,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+        }
+        if tools:
+            body["tools"] = tools
+
+        data = json.dumps(body).encode("utf-8")
+        response = self._open_stream(url, data)
+
+        # 按 index 缓冲 tool_calls
+        # tc_buffer[index] = {"id": "...", "name": "...", "arguments": "..."}
+        tc_buffer: Dict[int, Dict[str, str]] = {}
+        tool_calls_detected = False
+        stream_ended = False
+
+        try:
+            raw_buffer = b""
+            for raw_chunk in response:
+                raw_buffer += raw_chunk
+                while b"\n" in raw_buffer:
+                    line_bytes, raw_buffer = raw_buffer.split(b"\n", 1)
+                    try:
+                        line = line_bytes.decode("utf-8").strip()
+                    except UnicodeDecodeError:
+                        continue
+                    if not line:
+                        continue
+                    if not line.startswith("data: "):
+                        continue
+                    payload = line[6:]
+                    if payload == "[DONE]":
+                        stream_ended = True
+                        break
+                    try:
+                        chunk = json.loads(payload)
+                    except json.JSONDecodeError:
+                        continue
+
+                    choices = chunk.get("choices", [])
+                    if not choices:
+                        continue
+                    delta = choices[0].get("delta", {})
+                    finish_reason = choices[0].get("finish_reason")
+
+                    # 处理 content token（仅在未检测到 tool_calls 且流未结束时）
+                    if not tool_calls_detected and not stream_ended:
+                        content = delta.get("content", "")
+                        if content:
+                            yield StreamEvent("content", content=content)
+
+                    # 处理增量 tool_calls
+                    raw_tc_list = delta.get("tool_calls")
+                    if raw_tc_list:
+                        for tc_delta in raw_tc_list:
+                            idx = tc_delta.get("index", 0)
+                            if idx not in tc_buffer:
+                                tc_buffer[idx] = {"id": "", "name": "", "arguments": ""}
+                            if tc_delta.get("id"):
+                                tc_buffer[idx]["id"] = tc_delta["id"]
+                            func_delta = tc_delta.get("function", {})
+                            if func_delta.get("name"):
+                                tc_buffer[idx]["name"] = func_delta["name"]
+                            if func_delta.get("arguments"):
+                                tc_buffer[idx]["arguments"] += func_delta["arguments"]
+
+                    # finish_reason="tool_calls" 表示工具调用完成
+                    if finish_reason == "tool_calls":
+                        tool_calls_detected = True
+                        break
+
+                if tool_calls_detected or stream_ended:
+                    break
+
+        finally:
+            response.close()
+
+        # 如果缓冲区有 tool_calls，yield 完整的 tool_calls 事件
+        if tc_buffer:
+            parsed_calls = []
+            for idx in sorted(tc_buffer.keys()):
+                tc = tc_buffer[idx]
+                parsed_calls.append({
+                    "id": tc["id"] or f"call_{idx}",
+                    "type": "function",
+                    "function": {
+                        "name": tc["name"],
+                        "arguments": tc["arguments"],
+                    },
+                })
+            yield StreamEvent("tool_calls", tool_calls=parsed_calls)
+
+        yield StreamEvent("done")
 
     def _http_request(self, url: str, data: bytes) -> dict:
         """带重试的 HTTP POST 请求（4xx 客户端错误不重试）"""

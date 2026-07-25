@@ -11,7 +11,7 @@ from src.config import (
     OPENAI_API_KEY, OPENAI_BASE_URL, OPENAI_MODEL_NAME,
     AI_TEMPERATURE, AI_MAX_TOKENS, get_remote_endpoints
 )
-from src.ai.providers import LLMProvider, OllamaProvider, OpenAICompatProvider
+from src.ai.providers import LLMProvider, StreamEvent, OllamaProvider, OpenAICompatProvider
 from src.ai.prompt_templates import PromptTemplates
 
 
@@ -263,11 +263,39 @@ class LLMClient:
         try:
             return self._provider.chat_with_tools(
                 messages, tools,
-                temperature or AI_TEMPERATURE,
-                max_tokens or AI_MAX_TOKENS,
+                temperature if temperature is not None else AI_TEMPERATURE,
+                max_tokens if max_tokens is not None else AI_MAX_TOKENS,
             )
         except Exception as e:
             return {"content": f"⚠️ AI 调用失败: {str(e)}", "tool_calls": None}
+
+    def chat_with_tools_stream(
+        self,
+        messages: List[Dict[str, Any]],
+        tools: List[dict],
+        temperature: float = None,
+        max_tokens: int = None,
+    ) -> Iterator[StreamEvent]:
+        """
+        带工具调用的流式对话（代理到当前 provider）
+
+        Yields:
+            StreamEvent: content → tool_calls → done
+        """
+        if not self._provider.is_available():
+            yield StreamEvent("content", content="⚠️ AI 服务未启动")
+            yield StreamEvent("done")
+            return
+
+        try:
+            yield from self._provider.chat_with_tools_stream(
+                messages, tools,
+                temperature if temperature is not None else AI_TEMPERATURE,
+                max_tokens if max_tokens is not None else AI_MAX_TOKENS,
+            )
+        except Exception as e:
+            yield StreamEvent("content", content=f"⚠️ AI 调用失败: {str(e)}")
+            yield StreamEvent("done")
 
 
 # 便捷函数

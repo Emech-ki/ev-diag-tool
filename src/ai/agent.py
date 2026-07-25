@@ -12,10 +12,11 @@ AI Agent 模块 — 阶段三：Tool Calling 版
 """
 
 import json
-from typing import Optional, Dict, Any, List, Callable
+from typing import Optional, Dict, Any, List, Callable, Iterator
 
 from src.engine.knowledge_base import KnowledgeBase
 from src.ai.llm_client import LLMClient
+from src.ai.providers import StreamEvent
 from src.ai.tools import ToolRegistry
 from src.ai.diagnostic_tools import register_diagnostic_tools
 from src.ai.prompt_templates import PromptTemplates
@@ -139,6 +140,74 @@ class DiagnosticAgent:
         # 2. chat_with_tools 返回 content 但没有 tool_calls（LLM 没真正调用工具）
         return self._run_with_prefetch(user_message, on_tool_call, on_tool_result)
 
+    def run_stream(
+        self,
+        user_message: str,
+        on_tool_call: Optional[Callable[[str, dict], None]] = None,
+        on_tool_result: Optional[Callable[[str, str], None]] = None,
+    ) -> Iterator[StreamEvent]:
+        """
+        Agent 主循环 — 流式 ReAct 模式
+
+        与 run() 相同的逻辑，但返回 StreamEvent 流而不是最终字符串。
+        UI 可以逐 token 显示 LLM 的思考和回答过程。
+
+        Yields:
+            StreamEvent: content token / tool_calls / done
+        """
+        messages = self._build_messages(user_message)
+
+        # 先尝试流式 Tool Calling
+        try:
+            # 用流式方式发送第一轮，检测是否有 tool_calls
+            first_content = ""
+            first_tool_calls = None
+
+            for event in self.llm.chat_with_tools_stream(
+                messages[:], self.tools.to_openai_format()
+            ):
+                if event.type == "content":
+                    first_content += event.content
+                    yield event
+                elif event.type == "tool_calls":
+                    first_tool_calls = event.tool_calls
+                    # 不 yield tool_calls 给 UI（由 Agent 自己处理）
+                elif event.type == "done":
+                    break
+
+            if first_tool_calls:
+                # 有 tool_calls → 进入流式 ReAct 循环
+                # 先把已收到的 content 作为 assistant 消息
+                yield from self._run_react_loop_stream(
+                    messages, user_message, on_tool_call, on_tool_result,
+                    first_content, first_tool_calls,
+                )
+                return
+            else:
+                # 没有 tool_calls → 已经是最终回答（content 已经 yield 过了）
+                self._history.append({"role": "user", "content": user_message})
+                self._history.append({"role": "assistant", "content": first_content})
+                yield StreamEvent("done")
+                return
+
+        except Exception as e:
+            # 流式调用失败 — 如果已经 yield 了部分 content 给 UI，
+            # 不能再走 fallback（否则 UI 会显示"部分内容 + 完整回复"的拼接）。
+            # 只有在没有 yield 过任何 content 时才降级。
+            if not first_content:
+                try:
+                    result = self._run_with_prefetch(user_message, on_tool_call, on_tool_result)
+                    yield StreamEvent("content", content=result)
+                    yield StreamEvent("done")
+                except Exception:
+                    yield StreamEvent("content", content=f"⚠️ AI 调用失败: {e}")
+                    yield StreamEvent("done")
+            else:
+                # 已经 yield 了部分内容，无法回退 — 报错结束
+                yield StreamEvent("content", content=f"\n\n⚠️ 流式中断: {e}")
+                yield StreamEvent("done")
+            return
+
     def _run_react_loop(
         self,
         messages: list,
@@ -198,7 +267,7 @@ class DiagnosticAgent:
                             "notice": f"你已经调用过 {tool_name}，结果在上面。请基于已有数据给出最终诊断分析，不要再调用工具。",
                         }, ensure_ascii=False),
                     })
-                    any_new_call = True
+                    # 不设置 any_new_call — 重复调用不算新调用
                     continue
 
                 called_tools.add(call_key)
@@ -236,6 +305,123 @@ class DiagnosticAgent:
         self._history.append({"role": "user", "content": user_message})
         self._history.append({"role": "assistant", "content": answer})
         return answer
+
+    def _run_react_loop_stream(
+        self,
+        messages: list,
+        user_message: str,
+        on_tool_call: Optional[Callable],
+        on_tool_result: Optional[Callable],
+        first_content: str,
+        first_tool_calls: list,
+    ) -> Iterator[StreamEvent]:
+        """
+        流式 ReAct 循环
+
+        与 _run_react_loop 相同的逻辑，但：
+        - 每一轮 LLM 调用使用流式（逐 token yield）
+        - 工具执行结果通过 on_tool_call/on_tool_result 回调通知 UI
+        - 最终回答也通过流式 yield
+        """
+        content = first_content
+        tool_calls = first_tool_calls
+        called_tools = set()
+
+        for round_num in range(MAX_TOOL_ROUNDS):
+            if not tool_calls:
+                # 没有工具调用 → 最终回答（content 已经 yield 过了）
+                final_answer = content
+                self._history.append({"role": "user", "content": user_message})
+                self._history.append({"role": "assistant", "content": final_answer})
+                yield StreamEvent("done")
+                return
+
+            # 有工具调用 → 执行工具
+            assistant_msg = {"role": "assistant", "content": content or ""}
+            messages.append(assistant_msg)
+
+            any_new_call = False
+            for tc in tool_calls:
+                tc_id = tc.get("id", "")
+                func = tc.get("function", {})
+                tool_name = func.get("name", "")
+                tool_args_str = func.get("arguments", "{}")
+
+                try:
+                    tool_args = json.loads(tool_args_str) if isinstance(tool_args_str, str) else tool_args_str
+                except json.JSONDecodeError:
+                    tool_args = {}
+
+                # 去重检查
+                call_key = f"{tool_name}:{json.dumps(tool_args, sort_keys=True)}"
+                if call_key in called_tools:
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": tc_id,
+                        "content": json.dumps({
+                            "notice": f"你已经调用过 {tool_name}，结果在上面。请基于已有数据给出最终诊断分析，不要再调用工具。",
+                        }, ensure_ascii=False),
+                    })
+                    # 不设置 any_new_call — 重复调用不算新调用
+                    continue
+
+                called_tools.add(call_key)
+                any_new_call = True
+
+                # 通知 UI
+                if on_tool_call:
+                    on_tool_call(tool_name, tool_args)
+
+                # 执行工具
+                result_str = self.tools.execute(tool_name, tool_args)
+
+                if on_tool_result:
+                    summary = result_str[:200] + "..." if len(result_str) > 200 else result_str
+                    on_tool_result(tool_name, summary)
+
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": tc_id,
+                    "content": result_str,
+                })
+
+            if not any_new_call:
+                break
+
+            # 下一轮：流式调用 LLM
+            content = ""
+            tool_calls = None
+
+            for event in self.llm.chat_with_tools_stream(
+                messages, self.tools.to_openai_format()
+            ):
+                if event.type == "content":
+                    content += event.content
+                    yield event  # 逐 token 转发给 UI
+                elif event.type == "tool_calls":
+                    tool_calls = event.tool_calls
+                elif event.type == "done":
+                    break
+
+        # 循环次数用尽
+        if tool_calls:
+            # 还有未处理的 tool_calls → 用普通 chat 做总结
+            summary_prompt = "请基于以上所有工具查询的结果，给出最终的诊断分析和建议。"
+            try:
+                answer = self.llm.chat(message=summary_prompt, context=messages)
+            except Exception:
+                answer = "⚠️ 诊断轮次过多，请基于当前信息手动分析。"
+            yield StreamEvent("content", content=answer)
+            self._history.append({"role": "user", "content": user_message})
+            self._history.append({"role": "assistant", "content": answer})
+        else:
+            # 最后一轮 follow-up streaming 返回了 content 但没有 tool_calls
+            # content 已经 yield 给 UI，但需要记录到 history
+            final_answer = content or ""
+            self._history.append({"role": "user", "content": user_message})
+            self._history.append({"role": "assistant", "content": final_answer})
+
+        yield StreamEvent("done")
 
     def _run_with_prefetch(
         self,
@@ -400,11 +586,11 @@ class DiagnosticAgent:
     def chat_stream(self, message: str):
         """
         流式对话（兼容旧接口）
-        注意：Tool Calling 版本暂时用非流式实现，
-        因为流式 + tool_calls 的处理比较复杂。
-        后续可优化为流式版本。
+        内部调用 run_stream，逐 token yield。
         """
-        yield self.run(message)
+        for event in self.run_stream(message):
+            if event.type == "content":
+                yield event.content
 
     def reset_session(self):
         """重置当前诊断会话"""

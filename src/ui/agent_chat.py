@@ -23,7 +23,7 @@ _BOLD_RE = re.compile(r'\*\*(.*?)\*\*')
 
 
 class AgentStreamWorker(QThread):
-    """AI Agent 流式工作线程"""
+    """AI Agent 流式工作线程 — 全链路流式"""
     chunk = pyqtSignal(str)
     finished = pyqtSignal()
     error = pyqtSignal(str)
@@ -37,7 +37,6 @@ class AgentStreamWorker(QThread):
 
     def run(self):
         try:
-            # 使用带工具调用的 Agent 循环
             def on_tool_call(name, args):
                 args_desc = ", ".join(f"{k}={v}" for k, v in args.items())
                 self.tool_call_signal.emit(name, args_desc)
@@ -45,12 +44,16 @@ class AgentStreamWorker(QThread):
             def on_tool_result(name, result):
                 self.tool_result_signal.emit(name, result)
 
-            result = self.agent.run(
+            # 使用流式 run_stream，逐 token emit
+            for event in self.agent.run_stream(
                 self.message,
                 on_tool_call=on_tool_call,
                 on_tool_result=on_tool_result,
-            )
-            self.chunk.emit(result)
+            ):
+                if event.type == "content":
+                    self.chunk.emit(event.content)
+                # tool_calls 和 done 事件由 Agent 内部处理
+
             self.finished.emit()
         except Exception as e:
             self.error.emit(str(e))
@@ -271,23 +274,55 @@ class AgentChatPanel(QWidget):
     def _start_stream_message(self):
         """开始流式消息"""
         self._stream_content = ""
+        self._pending_bold_buf = ""  # 跨 token 粗体缓冲区
 
     def _append_stream_token(self, token: str):
-        """追加流式 token 到当前消息（直接追加文本，不重写 HTML）"""
+        """追加流式 token 到当前消息（支持跨 token 的 **粗体** 标记）"""
         self._stream_content += token
 
-        # 转义 HTML 特殊字符
-        escaped = html_mod.escape(token)
-        escaped = _BOLD_RE.sub(r'<strong>\1</strong>', escaped)
-        escaped = escaped.replace('\n', '<br>')
+        # 如果有未闭合的粗体缓冲，先拼接
+        work = self._pending_bold_buf + token
+        self._pending_bold_buf = ""
+
+        # 按 ** 分割，奇数段需要加粗
+        parts = work.split("**")
+
+        # 如果 parts 长度为偶数，说明最后一个是未闭合的（缺少右 **）
+        # 需要缓冲到下一个 token
+        if len(parts) % 2 == 0:
+            # 最后一段缺少右 **，缓冲起来
+            self._pending_bold_buf = parts[-1]
+            parts = parts[:-1]
+
+        html_parts = []
+        for i, part in enumerate(parts):
+            escaped = html_mod.escape(part)
+            escaped = escaped.replace('\n', '<br>')
+            if i % 2 == 1:
+                # 奇数段 → 粗体
+                html_parts.append(f"<strong>{escaped}</strong>")
+            else:
+                html_parts.append(escaped)
+
+        rendered = "".join(html_parts)
+        if not rendered:
+            return
 
         cursor = self.chat_edit.textCursor()
         cursor.movePosition(QTextCursor.MoveOperation.End)
-        cursor.insertHtml(escaped)
+        cursor.insertHtml(rendered)
         self.chat_edit.ensureCursorVisible()
 
     def _finalize_stream_message(self):
         """流式完成后，记录消息并从列表重建整个聊天（确保格式正确）"""
+        # 刷新未闭合的粗体缓冲
+        if self._pending_bold_buf:
+            escaped = html_mod.escape(self._pending_bold_buf)
+            escaped = escaped.replace('\n', '<br>')
+            cursor = self.chat_edit.textCursor()
+            cursor.movePosition(QTextCursor.MoveOperation.End)
+            cursor.insertHtml(escaped)
+            self._pending_bold_buf = ""
         if not self._stream_content:
             return
         # 将流式内容记录到消息列表
@@ -308,7 +343,10 @@ class AgentChatPanel(QWidget):
                 pass
             if self.worker.isRunning():
                 self.worker.quit()
-                self.worker.wait(5000)
+                if not self.worker.wait(5000):
+                    # wait 超时 → 强制终止
+                    self.worker.terminate()
+                    self.worker.wait(1000)
 
     def on_send_message(self):
         message = self.message_input.text().strip()
