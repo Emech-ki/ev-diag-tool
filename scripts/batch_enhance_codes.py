@@ -329,8 +329,10 @@ def main():
     print(f"Model: {config['model']}")
     print(f"Base URL: {config['base_url']}")
 
-    # 连接数据库
-    conn = sqlite3.connect(str(DB_PATH))
+    # 连接数据库（WAL 模式 + busy_timeout 支持并发读写）
+    conn = sqlite3.connect(str(DB_PATH), timeout=30)
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA busy_timeout=10000")
 
     # 加载进度
     progress = load_progress()

@@ -105,10 +105,11 @@ class DatabaseManager:
             return str(project_root / "data" / "obd_codes.db")
 
     def get_connection(self) -> sqlite3.Connection:
-        """获取数据库连接（每次调用新建连接，WAL 模式支持并发读）"""
-        conn = sqlite3.connect(self.db_path, timeout=10)
+        """获取数据库连接（每次调用新建连接，WAL 模式支持并发读写）"""
+        conn = sqlite3.connect(self.db_path, timeout=30)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA busy_timeout=10000")  # 10秒等待，避免 database is locked
         conn.execute("PRAGMA foreign_keys=ON")
         return conn
 
@@ -238,7 +239,6 @@ class DatabaseManager:
         with self._write_lock:
             conn = self.get_connection()
             try:
-                conn.execute("BEGIN IMMEDIATE")
                 cursor = conn.cursor()
                 row = cursor.execute(
                     "SELECT symptoms FROM obd_codes WHERE code = ?", (code.upper(),)
@@ -281,7 +281,6 @@ class DatabaseManager:
         with self._write_lock:
             conn = self.get_connection()
             try:
-                conn.execute("BEGIN IMMEDIATE")
                 cursor = conn.cursor()
                 cursor.execute("""
                     INSERT INTO diagnostic_history
