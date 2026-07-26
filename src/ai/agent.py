@@ -639,44 +639,63 @@ class DiagnosticAgent:
         messages.append({"role": "user", "content": user_message})
         return messages
 
-    @staticmethod
-    def _select_expert(code: Optional[str], user_message: str) -> str:
+    def _select_expert(self, code: Optional[str], user_message: str) -> str:
         """
         根据故障码和用户消息选择专家
 
-        路由规则：
-        1. 按故障码系统前缀匹配
-        2. 按消息关键词匹配
-        3. 默认使用通用专家
+        路由规则（优先级从高到低）：
+        1. 查询数据库 system 字段
+        2. P0Axx 码按描述关键词细分（电机/热管理/BMS）
+        3. 按用户消息关键词匹配（仅诊断相关消息）
+        4. 默认通用专家
 
         Returns:
             专家名称: "bms" / "motor" / "thermal" / "general"
         """
         code_upper = (code or "").upper()
-        msg = user_message.lower()
 
-        # 1. 按故障码系统匹配
-        if code_upper.startswith(("P0A", "P0B", "P0C")):
-            return "bms"
-        if "EV-BMS" in code_upper or "EV-HV" in code_upper:
-            return "bms"
-        if "EV-MOTOR" in code_upper:
-            return "motor"
-        if "EV-THERMAL" in code_upper:
-            return "thermal"
+        # 1. 查询数据库 system 字段（最可靠）
+        if code_upper:
+            try:
+                kb_data = self.kb.lookup(code_upper)
+                if kb_data:
+                    system = (kb_data.get("system") or "").upper()
+                    desc = (kb_data.get("description") or "").lower()
 
-        # 2. 按消息关键词匹配
-        bms_keywords = ["电池", "bms", "单体", "电压", "绝缘", "充电", "soc", "soh", "均衡", "接触器", "预充"]
-        if any(kw in msg for kw in bms_keywords):
-            return "bms"
+                    # 按 system 字段路由
+                    if "EV-BMS" in system or "EV-HV" in system:
+                        return "bms"
+                    if "EV-MOTOR" in system:
+                        return "motor"
+                    if "EV-THERMAL" in system:
+                        return "thermal"
 
-        motor_keywords = ["电机", "扭矩", "旋变", "驱动", "三相", "逆变器", "mcu", "转速"]
-        if any(kw in msg for kw in motor_keywords):
-            return "motor"
+                    # P0Axx 码按描述关键词细分
+                    if code_upper.startswith("P0A"):
+                        motor_desc = ["扭矩传感器", "旋变", "电机位置", "逆变器"]
+                        if any(kw in desc for kw in motor_desc):
+                            return "motor"
+                        # 其他 P0Axx 默认 BMS（电池冷却、高压系统等）
+                        return "bms"
 
-        thermal_keywords = ["冷却", "温度", "水泵", "散热", "热管理", "风扇", "空调", "热泵", "冷媒"]
-        if any(kw in msg for kw in thermal_keywords):
-            return "thermal"
+                    # P/B/C/U 码按 system 首字母
+                    if system.startswith("P") or system.startswith("B"):
+                        return "general"
+            except Exception:
+                pass
+
+        # 2. 按用户消息关键词匹配（仅当没有故障码时）
+        if not code_upper:
+            msg = user_message.lower()
+            bms_keywords = ["电池", "bms", "单体", "电压", "绝缘", "充电", "soc", "soh", "均衡", "接触器", "预充"]
+            if any(kw in msg for kw in bms_keywords):
+                return "bms"
+            motor_keywords = ["电机", "扭矩", "旋变", "驱动", "三相", "逆变器", "mcu", "转速"]
+            if any(kw in msg for kw in motor_keywords):
+                return "motor"
+            thermal_keywords = ["冷却", "水泵", "散热", "热管理", "风扇", "空调", "热泵", "冷媒"]
+            if any(kw in msg for kw in thermal_keywords):
+                return "thermal"
 
         return "general"
 
