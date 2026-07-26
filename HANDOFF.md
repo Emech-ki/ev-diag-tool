@@ -1,122 +1,160 @@
 # Handoff Document — EV-Diag-Tool 会话交接
 
-**Date:** 2026-07-25
+**Date:** 2026-07-26
 **Project:** `D:\桌面\诊断ai程序\ev-diag-tool`
-**Version:** v3.1.0 — Streaming Tool Calling
+**Repo:** https://github.com/Emech-ki/ev-diag-tool.git
+**Version:** v3.3.0 — Multi-Agent + Batch Enhancement
+**Tests:** 85 passed (unit)
+**Database:** 8729 fault codes + 45 vehicle models
 
 ---
 
 ## 本次会话完成的工作
 
-### 1. 故障码数据库全量中文翻译
+### 1. Bug 修复（8 项）
 
-将 8729 条故障码的英文描述翻译为专业中文，翻译率从 3.4% 提升到 100%。
+| # | 严重度 | Bug | 修复 | 文件 |
+|---|--------|-----|------|------|
+| 1 | 🔴 CRITICAL | `ev_codes.csv` 重复 `symptoms` 列 | 删除重复列 | `data/seed/ev_codes.csv` |
+| 2 | 🟠 MEDIUM | `styles.py` 与 `styles/__init__.py` 冲突 | 删除遗留 `styles.py` | `src/ui/styles.py` (deleted) |
+| 3 | 🟡 LOW | `LLMClient` 线程安全 | 所有属性加 `provider_lock` | `src/ai/llm_client.py` |
+| 4 | 🟡 LOW | OpenAI URL `/v1` 追加逻辑 | `urlparse` 检测已有路径 | `src/ai/providers/openai_compat.py` |
+| 5 | ⚪ COSMETIC | 流式完成后全量重建闪烁 | 移除 `_rebuild_display()` 调用 | `src/ui/agent_chat.py` |
+| 6 | 🔴 HIGH | 相关故障码 XSS 注入 | 添加 `html.escape()` | `src/ui/result_panel.py` |
+| 7 | 🔴 HIGH | SQLite `database is locked` 并发写入 | 独立连接策略 + busy_timeout + 重试 | `src/database/db_manager.py`, `scripts/batch_enhance_codes.py` |
+| 8 | 🟡 LOW | AI 偶尔输出英文 | 系统 Prompt 强制中文要求 | `src/ai/prompt_templates.py` |
 
-| 文件 | 总数 | 翻译前纯中文 | 翻译后纯中文 |
-|------|------|-------------|-------------|
-| p_codes.csv | 6553 | 130 (2%) | 6553 (100%) |
-| b_codes.csv | 360 | 69 (19%) | 360 (100%) |
-| c_codes.csv | 525 | 26 (5%) | 525 (100%) |
-| u_codes.csv | 1231 | 34 (3%) | 1231 (100%) |
-| ev_codes.csv | 60 | 39 (65%) | 60 (100%) |
+### 2. 新功能（5 项）
 
-**翻译方法：** 使用多个并行 Task 代理进行 AI 翻译，分批处理（每批 ~200 条），经过 3 轮翻译 + 修复：
-- 第1轮：7个并行 Task 翻译 8667 条 description
-- 第2轮：2个并行 Task 修复 1529 条未翻译的 C/U 系列
-- 第3轮：2个并行 Task 修复 1008 条翻译损坏的条目
+#### 2.1 编辑端点
+- 右键菜单编辑已配置的远程 API 端点
+- 改动: `add_endpoint_dialog.py`, `config.py` (新增 `update_endpoint_in_env`), `main_window.py`
 
-**翻译规则：**
-- 保留标准缩写：EGR、EVAP、ABS、CAN、HO2S、O2、MAP、MAF 等
-- Bank 1 = 第一排, Bank 2 = 第二排
-- Circuit/Open = 电路/开路, Circuit Low = 电路电压过低
-- Range/Performance = 范围/性能, Intermittent/Erratic = 间歇性/不稳定
+#### 2.2 诊断结果导出
+- 支持 txt/html 格式导出
+- 当前结果导出: 结果面板"导出报告"按钮
+- 历史记录导出: 历史面板右键菜单"导出此记录"
+- 新建: `src/ui/export_utils.py`
+- 改动: `result_panel.py`, `history_panel.py`, `main_window.py`
 
-**已删除的临时文件：**
-- `scripts/translate_codes_v3.py`（旧的词典翻译脚本）
-- `data/translation_batch_*.json`（翻译映射文件）
-- `data/translation_fix_*.json`、`data/translation_repair_*.json`
-- `data/all_translations.json`、`data/untranslated.json`、`data/corrupted.json`
+#### 2.3 Markdown 渲染增强
+- 新建 `src/ui/markdown_renderer.py`
+- 支持: 标题、粗体、斜体、删除线、行内代码、代码块、列表、引用、链接、分隔线
+- 改动: `result_panel.py`, `agent_chat.py`, `export_utils.py`
 
-### 2. 全链路流式 Tool Calling 实现
+#### 2.4 多 Agent 协作（专家路由系统）
+- 4 个专家: BMS 电池管理、电机驱动、热管理、通用诊断
+- 路由逻辑: 查询数据库 `system` 字段 + P0Axx 描述关键词细分
+- 专家知识通过 `get_expert_context` 工具查询（不注入 Prompt，保护 7B 模型输出质量）
+- 系统 Prompt 注入专家角色声明 + 专家名称
+- 新建: `data/seed/expert_context.json`
+- 改动: `src/ai/diagnostic_tools.py` (新增第 10 个工具), `src/ai/agent.py`, `src/ai/prompt_templates.py`
 
-将 AI Agent 对话从"伪流式"（等待全部完成后一次性显示）升级为"全链路流式"（逐 token 实时显示）。
+#### 2.5 AI 批量故障码增强脚本
+- `scripts/batch_enhance_codes.py`
+- 逐条调用 AI 为故障码生成详细诊断信息（detail, severity, common_causes, diagnostic_steps, symptoms）
+- 支持 Ollama 和 OpenAI 兼容 API（当前使用 MiMo API: mimo-v2.5-pro）
+- 并发 5 路请求，预计总时间 ~15 小时
+- 断点续传，进度保存到 `data/enhancement_progress.json`
 
-#### 改动的文件（6个）
+### 3. 代码清理
 
-**`src/ai/providers/__init__.py`**
-- 新增 `StreamEvent` 数据类（type: "content" | "tool_calls" | "done"）
-- 新增 `chat_with_tools_stream` 默认实现（回退到非流式）
+| 操作 | 文件 |
+|------|------|
+| 删除死代码 | `src/ui/animation.py`, `src/ui/styles/dark_theme.qss` |
+| 清理未用导入 | `re`, `QColor`, `_BOLD_RE` |
+| 修复重复信号连接 | `src/ui/add_endpoint_dialog.py` |
 
-**`src/ai/providers/ollama.py`**
-- 实现 `chat_with_tools_stream`：Ollama NDJSON 流式解析
-- Ollama 流式模式下 tool_calls 在单个 chunk 中完整返回（非增量）
+### 4. 实训验证
 
-**`src/ai/providers/openai_compat.py`**
-- 实现 `chat_with_tools_stream`：OpenAI SSE 流式解析
-- 增量 tool_calls 按 index 缓冲拼接（name + arguments 片段）
-- `tool_calls_detected` 标志防止检测到 tool_calls 后继续 yield content
+生成 5 个故障场景的实训单和答案文件（Word）：
+- `EV-Diag-Tool_故障实训单.docx` — 桌面
+- `EV-Diag-Tool_实训答案.docx` — 桌面
 
-**`src/ai/llm_client.py`**
-- 新增 `chat_with_tools_stream` 代理方法，转发到当前 provider
+5 个场景覆盖: BMS (P0A00), 电机 (P0A17), 热管理 (P0A01), 动力总成 (P0300), 车身 (B1420)
 
-**`src/ai/agent.py`**
-- 新增 `run_stream` 方法：流式 ReAct 循环入口
-- 新增 `_run_react_loop_stream` 方法：流式版本的工具调用循环
-- 重写 `chat_stream`：调用 `run_stream` 而非伪流式 `yield self.run()`
-
-**`src/ui/agent_chat.py`**
-- `AgentStreamWorker.run()` 改为消费 `StreamEvent`，逐 token emit
-
-#### 数据流
+### 5. Git 提交记录
 
 ```
-用户输入
-    ↓
-AgentStreamWorker.run()  (QThread 子线程)
-    ↓
-agent.run_stream(message)  →  Iterator[StreamEvent]
-    ↓
-llm.chat_with_tools_stream(messages, tools)
-    ↓ (逐 token)
-StreamEvent("content", "你")  →  chunk.emit("你")  →  _append_stream_token()
-StreamEvent("content", "好")  →  chunk.emit("好")  →  _append_stream_token()
-...
-StreamEvent("tool_calls", [...])  →  执行工具  →  on_tool_call()  →  UI显示"🔍 查询故障码"
-StreamEvent("content", "根据")  →  chunk.emit("根据")  →  _append_stream_token()
-...
-StreamEvent("done")  →  finished.emit()  →  _finalize_stream_message()
+292d972 feat: bug修复 + 编辑端点 + 诊断导出 + Markdown渲染 + 批量增强
+96f172f feat: 多Agent协作 — 专家路由系统
+cbed637 fix: SQLite并发写入 database is locked 修复
+94847b0 fix: 上下文中注入专家名称
+32d4832 fix: 彻底修复 database is locked — 独立连接策略
+1041f0e fix: 专家路由改用数据库 system 字段
+c3f1f00 fix: 强制中文输出
 ```
-
-#### Bug 修复（3个）
-
-| # | 文件 | Bug | 修复 |
-|---|------|-----|------|
-| 1 | `ollama.py:284` | 冗余循环导入 `from src.ai.providers import StreamEvent as SE`，与顶部导入冲突 | 删除冗余导入，统一使用 `StreamEvent` |
-| 2 | `openai_compat.py:340` | `finish_reason == "tool_calls"` 的 `break` 只跳出内层 `while` 循环，外层 `for` 继续读取可能 yield 多余 content | 添加 `tool_calls_detected` 标志，双层 break |
-| 3 | `openai_compat.py:288` | `content_buf` 变量累积但从未使用 | 删除未使用变量 |
 
 ---
 
 ## 当前项目状态
 
-- **版本：** v3.1.0 — Streaming Tool Calling
-- **阶段：** 阶段三增强 — 全链路流式 + 翻译完成
+- **版本：** v3.3.0 — Multi-Agent + Batch Enhancement
 - **测试：** 85 单元测试全部通过
-- **功能验证：** 41 通过 / 1 失败（车型表数据问题，非代码问题）
 - **数据库：** 8729 故障码（100% 中文） + 45 车型
+- **数据质量：** ~1100 条有详细诊断信息（批量增强持续增长中）
+- **后台任务：** MiMo API 批量增强运行中（并发 5，预计 ~15 小时完成）
 
-## 未完成的开源数据库扩展
+## 后台运行中的任务
 
-Wal33D/dtc-database (GitHub) 有 28,220+ 条故障码（含 18,805 条厂商自定义码），但网络下载受限。建议后续手动克隆：
+批量增强脚本正在后台运行：
 ```bash
-git clone https://github.com/Wal33D/dtc-database.git data/wal33d-dtc
+# 查看进度
+python -c "import json; p=json.load(open('data/enhancement_progress.json',encoding='utf-8')); c=len(p.get('completed',[])); f=len(p.get('failed',[])); print(f'completed: {c}  failed: {f}')"
+
+# 重新运行（断点续传）
+cd D:\桌面\诊断ai程序\ev-diag-tool
+python scripts/batch_enhance_codes.py
 ```
+
+当前使用 MiMo API（mimo-v2.5-pro），配置在 `.env` 中：
+```
+AI_PROVIDER=openai
+OPENAI_ENDPOINT_1_NAME=MiMo
+OPENAI_ENDPOINT_1_URL=https://token-plan-cn.xiaomimimo.com/v1
+OPENAI_ENDPOINT_1_KEY=REDACTED
+OPENAI_ENDPOINT_1_MODEL=mimo-v2.5-pro
+```
+
+## 新建的文件
+
+| 文件 | 说明 |
+|------|------|
+| `src/ui/markdown_renderer.py` | Markdown → HTML 渲染器 |
+| `src/ui/export_utils.py` | 诊断结果导出工具（txt/html） |
+| `scripts/batch_enhance_codes.py` | AI 批量故障码增强脚本 |
+| `scripts/generate_training_docs.py` | 实训单/答案生成脚本 |
+| `data/seed/expert_context.json` | 专家领域知识（BMS/电机/热管理/通用） |
+| `HANDOFF.md` | 本文件 |
+
+## 删除的文件
+
+| 文件 | 原因 |
+|------|------|
+| `src/ui/animation.py` | 未被任何代码引用，动画效果有 GC 问题 |
+| `src/ui/styles/dark_theme.qss` | 预留文件，从未加载 |
+| `src/ui/styles.py` | 与 `styles/__init__.py` 冲突 |
 
 ## 建议的下一步工作
 
-1. **流式 Tool Calling 测试** — 实际运行测试流式输出效果
-2. **补全故障码** — 下载 Wal33D 数据库，补全厂商自定义码
-3. **编辑端点功能** — 右键菜单增加"编辑"
-4. **多 Agent 协作** — 主 Agent + 专家子 Agent（BMS/电机/热管理）
-5. **UI 优化** — Markdown 渲染增强、诊断结果导出
-6. **Git Push** — 提交当前成果到远程仓库
+1. **等批量增强完成** — 数据覆盖率从 ~13% 提升到 100%
+2. **深色模式** — 实现暗色主题切换
+3. **诊断历史分析** — 高频故障码统计、常见车型故障分布
+4. **离线体验优化** — 无 AI 时的纯知识库诊断交互
+5. **测试覆盖** — 为 export_utils、markdown_renderer 编写单元测试
+6. **多 Agent 协作扩展** — 主 Agent + 专家子 Agent 并行诊断
+
+---
+
+## 关键文件速查
+
+| 文件 | 说明 |
+|------|------|
+| `CLAUDE.md` | Claude Code 项目规范 |
+| `README.md` | 项目完整蓝图和设计决策 |
+| `HANDOFF.md` | 本文件（会话交接） |
+| `src/ai/agent.py` | AI Agent 核心（ReAct 循环 + 专家路由） |
+| `src/ai/diagnostic_tools.py` | 10 个诊断工具 |
+| `src/ai/prompt_templates.py` | 系统 Prompt（含专家角色声明） |
+| `src/database/db_manager.py` | SQLite 数据库管理（并发安全） |
+| `scripts/batch_enhance_codes.py` | 批量增强脚本（后台运行中） |
