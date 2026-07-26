@@ -627,11 +627,13 @@ class DiagnosticAgent:
         system_prompt = self.templates.get_expert_system_prompt(expert)
         messages.append({"role": "system", "content": system_prompt})
 
-        # 如果有活跃的诊断会话，添加上下文
+        # 如果有活跃的诊断会话，添加上下文（含专家名称）
+        expert_names = {"bms": "BMS 电池管理专家", "motor": "电机驱动专家", "thermal": "热管理专家", "general": "通用诊断专家"}
         if self.session_code:
             context = f"\n[当前诊断上下文]\n故障码: {self.session_code}"
             if self.session_vehicle:
                 context += f"\n车型: {self.session_vehicle}"
+            context += f"\n当前专家: {expert_names.get(expert, '通用诊断专家')}"
             user_message = context + f"\n\n技师提问: {user_message}"
 
         messages.append({"role": "user", "content": user_message})
