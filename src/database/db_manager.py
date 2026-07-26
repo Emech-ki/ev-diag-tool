@@ -223,7 +223,7 @@ class DatabaseManager:
 
     def record_symptoms(self, code: str, symptom: str) -> bool:
         """
-        为指定故障码记录一条观察到的现象（线程安全）
+        为指定故障码记录一条观察到的现象（带重试，支持跨进程并发）
 
         Args:
             code: 故障码
@@ -236,7 +236,9 @@ class DatabaseManager:
         if not symptom:
             return False
 
-        with self._write_lock:
+        import time
+        for attempt in range(5):
+            # 读取用普通连接
             conn = self.get_connection()
             try:
                 cursor = conn.cursor()
@@ -249,17 +251,27 @@ class DatabaseManager:
                 existing = self.parse_json_field(row["symptoms"])
                 if symptom not in existing:
                     existing.append(symptom)
-                    cursor.execute(
-                        "UPDATE obd_codes SET symptoms = ?, updated_at = CURRENT_TIMESTAMP WHERE code = ?",
-                        (json.dumps(existing, ensure_ascii=False), code.upper()),
-                    )
-                conn.commit()
+                    # 写入用独立连接（autocommit，立即释放锁）
+                    wconn = sqlite3.connect(self.db_path, timeout=30, isolation_level=None)
+                    wconn.execute("PRAGMA busy_timeout=10000")
+                    try:
+                        wconn.execute(
+                            "UPDATE obd_codes SET symptoms = ?, updated_at = CURRENT_TIMESTAMP WHERE code = ?",
+                            (json.dumps(existing, ensure_ascii=False), code.upper()),
+                        )
+                    finally:
+                        wconn.close()
                 return True
+            except sqlite3.OperationalError as e:
+                if "locked" in str(e) and attempt < 4:
+                    time.sleep(1 + attempt)
+                    continue
+                raise
             except Exception:
-                conn.rollback()
                 raise
             finally:
                 conn.close()
+        return False
 
     def get_symptoms(self, code: str) -> list:
         """获取指定故障码的已记录现象列表"""
@@ -276,24 +288,29 @@ class DatabaseManager:
 
     def save_history(self, code: str, vehicle_info: str = "", symptoms: str = "",
                      knowledge_found: bool = False, ai_suggestion: str = "") -> bool:
-        """保存诊断记录（使用本地时间）"""
+        """保存诊断记录（使用本地时间，支持跨进程并发）"""
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        with self._write_lock:
-            conn = self.get_connection()
+        import time
+        for attempt in range(5):
+            conn = sqlite3.connect(self.db_path, timeout=30, isolation_level=None)
+            conn.execute("PRAGMA busy_timeout=10000")
             try:
-                cursor = conn.cursor()
-                cursor.execute("""
+                conn.execute("""
                     INSERT INTO diagnostic_history
                         (code, vehicle_info, symptoms, knowledge_found, ai_suggestion, created_at)
                     VALUES (?, ?, ?, ?, ?, ?)
                 """, (code, vehicle_info, symptoms, 1 if knowledge_found else 0, ai_suggestion, now))
-                conn.commit()
                 return True
+            except sqlite3.OperationalError as e:
+                if "locked" in str(e) and attempt < 4:
+                    time.sleep(1 + attempt)
+                    continue
+                raise
             except Exception:
-                conn.rollback()
                 raise
             finally:
                 conn.close()
+        return False
 
     def get_history(self, limit: int = 50) -> List[Dict[str, Any]]:
         """获取诊断历史记录"""

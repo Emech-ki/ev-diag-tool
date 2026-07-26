@@ -259,26 +259,39 @@ def get_codes_needing_enhancement(conn, limit=None, progress=None):
     return codes
 
 
-def update_code(conn, code, data):
-    """更新数据库中的故障码"""
-    cursor = conn.cursor()
-    cursor.execute("""
-        UPDATE obd_codes
-        SET detail = ?,
-            severity = ?,
-            common_causes = ?,
-            diagnostic_steps = ?,
-            symptoms = ?,
-            updated_at = CURRENT_TIMESTAMP
-        WHERE code = ?
-    """, (
-        data.get("detail", ""),
-        data.get("severity", "medium"),
-        json.dumps(data.get("common_causes", []), ensure_ascii=False),
-        json.dumps(data.get("diagnostic_steps", []), ensure_ascii=False),
-        json.dumps(data.get("symptoms", []), ensure_ascii=False),
-        code,
-    ))
+def update_code(code, data):
+    """更新数据库中的故障码（每次独立连接，避免 database is locked）"""
+    import time as _time
+    for attempt in range(5):
+        conn = sqlite3.connect(str(DB_PATH), timeout=30, isolation_level=None)
+        conn.execute("PRAGMA busy_timeout=10000")
+        try:
+            conn.execute("""
+                UPDATE obd_codes
+                SET detail = ?,
+                    severity = ?,
+                    common_causes = ?,
+                    diagnostic_steps = ?,
+                    symptoms = ?,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE code = ?
+            """, (
+                data.get("detail", ""),
+                data.get("severity", "medium"),
+                json.dumps(data.get("common_causes", []), ensure_ascii=False),
+                json.dumps(data.get("diagnostic_steps", []), ensure_ascii=False),
+                json.dumps(data.get("symptoms", []), ensure_ascii=False),
+                code,
+            ))
+            return
+        except sqlite3.OperationalError as e:
+            conn.close()
+            if "locked" in str(e) and attempt < 4:
+                _time.sleep(1 + attempt)
+                continue
+            raise
+        finally:
+            conn.close()
 
 
 def validate_enhancement(data):
@@ -392,7 +405,7 @@ def main():
                 issues = validate_enhancement(data)
                 if issues:
                     print(f" [WARN: {', '.join(issues)}]", end="")
-                update_code(conn, code, data)
+                update_code(code, data)
                 progress.setdefault("completed", []).append(code)
                 success_count += 1
                 print(f" -> OK")
@@ -422,8 +435,7 @@ def main():
         if i < total - 1:
             time.sleep(0.5)
 
-    # 最终提交
-    conn.commit()
+    # 关闭读取连接
     save_progress(progress)
     conn.close()
 
