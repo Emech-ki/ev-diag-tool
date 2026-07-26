@@ -334,7 +334,6 @@ class DatabaseManager:
         with self._write_lock:
             conn = self.get_connection()
             try:
-                conn.execute("BEGIN IMMEDIATE")
                 conn.execute("DELETE FROM diagnostic_history")
                 conn.commit()
                 return True

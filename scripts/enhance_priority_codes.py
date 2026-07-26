@@ -29,7 +29,9 @@ def load_enhancement_data():
 
 def enhance_codes(db_path, enhancement_data):
     """更新数据库中的故障码信息"""
-    conn = sqlite3.connect(str(db_path))
+    conn = sqlite3.connect(str(db_path), timeout=30, isolation_level=None)
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA busy_timeout=10000")
     cursor = conn.cursor()
 
     success_count = 0
