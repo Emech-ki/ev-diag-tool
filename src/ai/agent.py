@@ -616,14 +616,15 @@ class DiagnosticAgent:
         构建发送给 LLM 的消息列表
 
         包含：
-        1. 系统提示词（告诉 LLM 它有工具可用）
+        1. 系统提示词（告诉 LLM 它有工具可用）+ 专家角色声明
         2. 诊断上下文（当前故障码、车型）
         3. 用户消息
         """
         messages = []
 
-        # 系统提示词 — 工具感知版本
-        system_prompt = self.templates.get_tool_agent_system_prompt()
+        # 选择专家并获取对应的系统提示词
+        expert = self._select_expert(self.session_code, user_message)
+        system_prompt = self.templates.get_expert_system_prompt(expert)
         messages.append({"role": "system", "content": system_prompt})
 
         # 如果有活跃的诊断会话，添加上下文
@@ -635,6 +636,47 @@ class DiagnosticAgent:
 
         messages.append({"role": "user", "content": user_message})
         return messages
+
+    @staticmethod
+    def _select_expert(code: Optional[str], user_message: str) -> str:
+        """
+        根据故障码和用户消息选择专家
+
+        路由规则：
+        1. 按故障码系统前缀匹配
+        2. 按消息关键词匹配
+        3. 默认使用通用专家
+
+        Returns:
+            专家名称: "bms" / "motor" / "thermal" / "general"
+        """
+        code_upper = (code or "").upper()
+        msg = user_message.lower()
+
+        # 1. 按故障码系统匹配
+        if code_upper.startswith(("P0A", "P0B", "P0C")):
+            return "bms"
+        if "EV-BMS" in code_upper or "EV-HV" in code_upper:
+            return "bms"
+        if "EV-MOTOR" in code_upper:
+            return "motor"
+        if "EV-THERMAL" in code_upper:
+            return "thermal"
+
+        # 2. 按消息关键词匹配
+        bms_keywords = ["电池", "bms", "单体", "电压", "绝缘", "充电", "soc", "soh", "均衡", "接触器", "预充"]
+        if any(kw in msg for kw in bms_keywords):
+            return "bms"
+
+        motor_keywords = ["电机", "扭矩", "旋变", "驱动", "三相", "逆变器", "mcu", "转速"]
+        if any(kw in msg for kw in motor_keywords):
+            return "motor"
+
+        thermal_keywords = ["冷却", "温度", "水泵", "散热", "热管理", "风扇", "空调", "热泵", "冷媒"]
+        if any(kw in msg for kw in thermal_keywords):
+            return "thermal"
+
+        return "general"
 
 
 # 便捷函数

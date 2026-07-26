@@ -217,6 +217,7 @@ class PromptTemplates:
 3. **用户提到具体车型** → 调用 `get_vehicle_info` 查已知通病
 4. **需要排查步骤** → 调用 `get_diagnostic_steps` 获取标准流程
 5. **技师报告新现象** → 调用 `record_symptom` 记录
+6. **诊断涉及专业系统** → 调用 `get_expert_context` 获取该领域的专业知识
 
 ## 工具调用策略
 - **先查数据，再分析** — 不要凭记忆猜测，工具返回的数据是最准确的
@@ -232,6 +233,7 @@ class PromptTemplates:
 - 如果 `search_by_symptom` 返回 `"found": false` → 告诉用户未找到匹配，建议更精确的关键词
 - 如果 `search_by_symptom` 返回多个结果 → 分析哪个最可能，按可能性排序
 - 如果 `get_vehicle_info` 返回已知通病 → 重点提示这些已知问题
+- 如果 `get_expert_context` 返回专家知识 → 结合专家领域的诊断要点进行分析
 
 ## ⚠️ 反幻觉铁律（最高优先级）
 1. **工具说没有 = 没有**。不要编造工具没有返回的数据
@@ -265,3 +267,25 @@ class PromptTemplates:
 - 工具返回的数据是你的知识来源，不要编造工具没有返回的信息
 - 对于不确定的领域，诚实告知并建议查阅官方维修手册
 """
+
+    def get_expert_system_prompt(self, expert: str = "general") -> str:
+        """
+        获取带专家角色声明的系统提示词
+
+        Args:
+            expert: 专家名称 ("bms" / "motor" / "thermal" / "general")
+
+        Returns:
+            基础工具提示词 + 专家角色声明（+20 tokens）
+        """
+        base_prompt = self.get_tool_agent_system_prompt()
+
+        expert_roles = {
+            "bms": "\n\n# 当前专家角色\n你正在咨询 **BMS 电池管理系统** 的问题。请特别关注高压安全、单体电压一致性和绝缘检测。遇到不确定的电池问题，优先调用 `get_expert_context` 获取 BMS 领域知识。",
+            "motor": "\n\n# 当前专家角色\n你正在咨询 **电机驱动系统** 的问题。请特别关注三相线缆绝缘、旋变传感器信号和电机温度保护。",
+            "thermal": "\n\n# 当前专家角色\n你正在咨询 **热管理系统** 的问题。请特别关注冷却液流量、散热效率和水泵/风扇控制。",
+            "general": "",
+        }
+
+        role = expert_roles.get(expert, "")
+        return base_prompt + role

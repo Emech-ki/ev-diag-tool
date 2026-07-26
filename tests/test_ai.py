@@ -373,7 +373,7 @@ class TestDiagnosticTools(unittest.TestCase):
         ]
         for name in expected:
             self.assertIn(name, registry, f"工具 {name} 未注册")
-        self.assertEqual(len(registry), 9)
+        self.assertEqual(len(registry), 10)
 
     def test_tool_schemas_valid(self):
         """测试所有工具的 schema 格式正确"""

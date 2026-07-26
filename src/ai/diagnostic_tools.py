@@ -7,10 +7,27 @@
 """
 
 import json
+import os
+from pathlib import Path
 from typing import Optional
 
 from src.ai.tools import Tool, ToolParam, ToolRegistry
 from src.engine.knowledge_base import KnowledgeBase
+
+# 专家领域知识缓存
+_EXPERT_CONTEXT_CACHE = None
+
+def _load_expert_context() -> dict:
+    """加载专家领域知识"""
+    global _EXPERT_CONTEXT_CACHE
+    if _EXPERT_CONTEXT_CACHE is None:
+        ctx_path = Path(__file__).resolve().parent.parent.parent / "data" / "seed" / "expert_context.json"
+        if ctx_path.exists():
+            with open(ctx_path, "r", encoding="utf-8") as f:
+                _EXPERT_CONTEXT_CACHE = json.load(f)
+        else:
+            _EXPERT_CONTEXT_CACHE = {}
+    return _EXPERT_CONTEXT_CACHE
 
 
 def register_diagnostic_tools(
@@ -206,6 +223,26 @@ def register_diagnostic_tools(
             ),
         ],
         function=lambda system: _search_codes_by_system(kb, system),
+    ))
+
+    # ── 工具 10: get_expert_context ──
+    registry.register(Tool(
+        name="get_expert_context",
+        description=(
+            "获取指定专家领域的诊断知识和注意事项。"
+            "当诊断涉及 BMS（电池管理）、电机驱动、热管理等专业系统时调用。"
+            "返回该领域的诊断要点、常见故障模式和安全提醒。"
+        ),
+        parameters=[
+            ToolParam(
+                name="expert",
+                type="string",
+                description="专家领域",
+                required=True,
+                enum=["bms", "motor", "thermal", "general"],
+            ),
+        ],
+        function=lambda expert: _get_expert_context(expert),
     ))
 
 
@@ -554,4 +591,24 @@ def _search_codes_by_system(kb: KnowledgeBase, system: str) -> str:
         "system_name": system_names.get(system, system),
         "count": len(codes),
         "codes": codes,
+    }, ensure_ascii=False, indent=2)
+
+
+def _get_expert_context(expert: str) -> str:
+    """工具10: 获取专家领域知识"""
+    expert = expert.strip().lower()
+    ctx = _load_expert_context()
+
+    if expert not in ctx:
+        available = list(ctx.keys())
+        return json.dumps({
+            "error": f"未知专家领域: {expert}",
+            "available": available,
+        }, ensure_ascii=False)
+
+    profile = ctx[expert]
+    return json.dumps({
+        "expert": expert,
+        "name": profile["name"],
+        "context": profile["context"],
     }, ensure_ascii=False, indent=2)
