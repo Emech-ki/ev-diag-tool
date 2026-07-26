@@ -203,8 +203,9 @@ def test_tool_search_empty():
 
 def test_tool_vehicle_info():
     r = json.loads(reg.execute("get_vehicle_info", {"make": "比亚迪", "model": "秦PLUS EV"}))
-    # 车型表为空，应该返回未找到
-    assert r["found"] is False
+    # 车型表有数据，应该返回找到
+    assert r["found"] is True, f"Expected found=True, got {r.get('found')}"
+    assert "common_codes" in r, "Missing common_codes field"
     return True
 
 def test_tool_related_codes():

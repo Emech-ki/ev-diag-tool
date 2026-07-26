@@ -186,3 +186,69 @@ def remove_endpoint_from_env(endpoint_name: str) -> bool:
     load_dotenv(env_path, override=True)
 
     return True
+
+
+def update_endpoint_in_env(endpoint_name: str, new_url: str, new_key: str, new_model: str) -> bool:
+    """
+    更新 .env 文件中指定端点的 URL、KEY、MODEL（NAME 不可修改）。
+
+    Args:
+        endpoint_name: 端点显示名称（如 "DeepSeek"）
+        new_url: 新的 API 地址
+        new_key: 新的 API Key
+        new_model: 新的模型名称
+
+    Returns:
+        是否更新成功
+    """
+    import re
+
+    env_path = PROJECT_ROOT / ".env"
+    if not env_path.exists():
+        return False
+
+    with open(env_path, "r", encoding="utf-8") as f:
+        lines = f.readlines()
+
+    # 找到该端点对应的索引
+    target_idx = None
+    for line in lines:
+        m = re.match(r"^OPENAI_ENDPOINT_(\d+)_NAME\s*=\s*(.+)", line.strip())
+        if m and m.group(2).strip() == endpoint_name:
+            target_idx = int(m.group(1))
+            break
+
+    if target_idx is None:
+        return False
+
+    # 替换 URL、KEY、MODEL 三行
+    prefix = f"OPENAI_ENDPOINT_{target_idx}_"
+    replacements = {
+        f"{prefix}URL": new_url,
+        f"{prefix}KEY": new_key,
+        f"{prefix}MODEL": new_model,
+    }
+
+    new_lines = []
+    for line in lines:
+        matched = False
+        for key, value in replacements.items():
+            if re.match(rf"^{key}\s*=", line.strip()):
+                new_lines.append(f"{key}={value}\n")
+                matched = True
+                break
+        if not matched:
+            new_lines.append(line)
+
+    with open(env_path, "w", encoding="utf-8") as f:
+        f.writelines(new_lines)
+
+    # 更新 os.environ
+    os.environ[f"OPENAI_ENDPOINT_{target_idx}_URL"] = new_url
+    os.environ[f"OPENAI_ENDPOINT_{target_idx}_KEY"] = new_key
+    os.environ[f"OPENAI_ENDPOINT_{target_idx}_MODEL"] = new_model
+
+    # 重新加载 .env
+    load_dotenv(env_path, override=True)
+
+    return True

@@ -1,0 +1,122 @@
+{
+  "system_templates": {
+    "Powertrain": {
+      "name": "动力总成系统",
+      "description": "发动机、变速箱、排放控制系统",
+      "common_systems": ["发动机管理系统", "燃油系统", "点火系统", "排放控制", "变速箱控制"],
+      "severity_guidance": {
+        "critical": "影响行车安全或可能导致严重损坏",
+        "high": "影响车辆性能或排放，需要尽快维修",
+        "medium": "影响燃油经济性或驾驶体验",
+        "low": "轻微异常，不影响正常驾驶"
+      }
+    },
+    "Body": {
+      "name": "车身系统",
+      "description": "安全气囊、车灯、车窗、空调等车身电器",
+      "common_systems": ["安全气囊系统", "车身控制模块", "空调系统", "车灯系统", "车窗控制"],
+      "severity_guidance": {
+        "critical": "安全气囊、安全带等安全系统故障",
+        "high": "影响驾驶安全或舒适性",
+        "medium": "影响便利功能",
+        "low": "轻微功能异常"
+      }
+    },
+    "Chassis": {
+      "name": "底盘系统",
+      "description": "ABS、ESP、转向、悬挂系统",
+      "common_systems": ["ABS系统", "ESP系统", "转向系统", "悬挂系统", "制动系统"],
+      "severity_guidance": {
+        "critical": "制动或转向系统故障",
+        "high": "影响车辆稳定性",
+        "medium": "影响驾驶舒适性",
+        "low": "轻微异常"
+      }
+    },
+    "Network": {
+      "name": "网络通讯系统",
+      "description": "CAN总线、LIN总线等通讯网络",
+      "common_systems": ["CAN总线", "LIN总线", "FlexRay", "以太网"],
+      "severity_guidance": {
+        "critical": "多个系统通讯中断",
+        "high": "关键系统通讯故障",
+        "medium": "非关键系统通讯异常",
+        "low": "间歇性通讯问题"
+      }
+    },
+    "EV-BMS": {
+      "name": "电池管理系统",
+      "description": "高压电池、BMS、充电系统",
+      "common_systems": ["电池包", "BMS控制器", "高压配电盒", "充电系统", "电池热管理"],
+      "severity_guidance": {
+        "critical": "高压安全风险或电池热失控",
+        "high": "电池性能严重下降",
+        "medium": "电池性能轻微下降",
+        "low": "电池系统轻微异常"
+      }
+    },
+    "EV-Motor": {
+      "name": "电机驱动系统",
+      "description": "驱动电机、电机控制器、减速器",
+      "common_systems": ["驱动电机", "电机控制器MCU", "减速器", "电机冷却系统"],
+      "severity_guidance": {
+        "critical": "电机无法工作或异响严重",
+        "high": "电机性能下降明显",
+        "medium": "电机轻微异常",
+        "low": "电机系统轻微异常"
+      }
+    },
+    "EV-Thermal": {
+      "name": "热管理系统",
+      "description": "电池热管理、电机热管理、空调系统",
+      "common_systems": ["冷却水泵", "散热器", "电子风扇", "热泵空调", "冷却液循环"],
+      "severity_guidance": {
+        "critical": "冷却系统完全失效",
+        "high": "冷却效率严重下降",
+        "medium": "冷却系统轻微异常",
+        "low": "冷却系统轻微异常"
+      }
+    }
+  },
+  "code_type_templates": {
+    "generic": {
+      "name": "通用故障码",
+      "description": "SAE标准定义的通用故障码",
+      "prefix": "P0xxx, B0xxx, C0xxx, U0xxx"
+    },
+    "manufacturer": {
+      "name": "厂商自定义故障码",
+      "description": "汽车厂商自定义的故障码",
+      "prefix": "P1xxx, B1xxx, C1xxx, U1xxx"
+    }
+  },
+  "generation_rules": {
+    "detail": {
+      "min_length": 100,
+      "max_length": 200,
+      "required_content": ["系统原理", "故障含义"]
+    },
+    "common_causes": {
+      "min_items": 5,
+      "max_items": 6,
+      "required_content": ["具体原因", "可检查项目"]
+    },
+    "diagnostic_steps": {
+      "min_items": 5,
+      "max_items": 7,
+      "required_content": ["具体操作", "工具使用", "判断标准"]
+    },
+    "symptoms": {
+      "min_items": 3,
+      "max_items": 4,
+      "required_content": ["可观测现象", "驾驶体验"]
+    }
+  },
+  "professional_terms": {
+    "electrical": ["开路", "短路", "电压过低", "电压过高", "电阻异常", "信号异常"],
+    "mechanical": ["磨损", "松动", "泄漏", "堵塞", "变形", "断裂"],
+    "thermal": ["过热", "温度过高", "温度过低", "冷却不足", "散热不良"],
+    "performance": ["性能下降", "响应慢", "效率低", "功率不足", "扭矩不足"],
+    "safety": ["安全风险", "高压危险", "热失控", "漏电", "绝缘失效"]
+  }
+}

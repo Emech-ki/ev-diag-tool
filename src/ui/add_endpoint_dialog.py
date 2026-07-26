@@ -1,5 +1,5 @@
 """
-添加远程 API 端点对话框
+添加/编辑远程 API 端点对话框
 支持配置 OpenAI 兼容的第三方 API（DeepSeek、OpenAI 等）
 """
 
@@ -17,15 +17,23 @@ from src.ui.styles import (
 
 
 class AddEndpointDialog(QDialog):
-    """添加远程 API 端点对话框"""
+    """添加/编辑远程 API 端点对话框"""
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, endpoint_data: dict = None):
+        """
+        Args:
+            parent: 父窗口
+            endpoint_data: 编辑模式时传入现有端点数据 {"name", "base_url", "api_key", "model_name"}
+                          为 None 时为添加模式
+        """
         super().__init__(parent)
         self.result_data = None
+        self._edit_mode = endpoint_data is not None
+        self._endpoint_data = endpoint_data or {}
         self._init_ui()
 
     def _init_ui(self):
-        self.setWindowTitle("添加远程模型")
+        self.setWindowTitle("编辑远程模型" if self._edit_mode else "添加远程模型")
         self.setMinimumWidth(420)
         self.setModal(True)
         self.setStyleSheet(f"""
@@ -79,6 +87,10 @@ class AddEndpointDialog(QDialog):
         self.name_input = QLineEdit()
         self.name_input.setPlaceholderText("如：DeepSeek")
         self.name_input.setStyleSheet(input_style)
+        if self._edit_mode:
+            self.name_input.setText(self._endpoint_data.get("name", ""))
+            self.name_input.setReadOnly(True)
+            self.name_input.setStyleSheet(input_style + "QLineEdit { color: #999; background: #f5f5f5; }")
         form_layout.addRow(name_label, self.name_input)
 
         # API 地址
@@ -87,6 +99,8 @@ class AddEndpointDialog(QDialog):
         self.url_input = QLineEdit()
         self.url_input.setPlaceholderText("如：https://api.deepseek.com/v1")
         self.url_input.setStyleSheet(input_style)
+        if self._edit_mode:
+            self.url_input.setText(self._endpoint_data.get("base_url", ""))
         form_layout.addRow(url_label, self.url_input)
 
         # API Key
@@ -95,6 +109,8 @@ class AddEndpointDialog(QDialog):
         self.key_input = QLineEdit()
         self.key_input.setPlaceholderText("如：sk-your-api-key")
         self.key_input.setStyleSheet(input_style)
+        if self._edit_mode:
+            self.key_input.setText(self._endpoint_data.get("api_key", ""))
         form_layout.addRow(key_label, self.key_input)
 
         # 模型名称
@@ -103,12 +119,17 @@ class AddEndpointDialog(QDialog):
         self.model_input = QLineEdit()
         self.model_input.setPlaceholderText("如：deepseek-chat")
         self.model_input.setStyleSheet(input_style)
+        if self._edit_mode:
+            self.model_input.setText(self._endpoint_data.get("model_name", ""))
         form_layout.addRow(model_label, self.model_input)
 
         layout.addWidget(form_frame)
 
         # 提示
-        hint = QLabel("配置将保存到 .env 文件，重启后仍然有效。")
+        if self._edit_mode:
+            hint = QLabel("修改将更新到 .env 文件。端点名称不可修改。")
+        else:
+            hint = QLabel("配置将保存到 .env 文件，重启后仍然有效。")
         hint.setStyleSheet(f"font-size: 11px; color: {TEXT_MUTED};")
         layout.addWidget(hint)
 
@@ -132,7 +153,7 @@ class AddEndpointDialog(QDialog):
 
         btn_layout.addSpacing(8)
 
-        self.confirm_btn = QPushButton("添加")
+        self.confirm_btn = QPushButton("保存" if self._edit_mode else "添加")
         self.confirm_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.confirm_btn.setStyleSheet(f"""
             QPushButton {{
@@ -149,13 +170,17 @@ class AddEndpointDialog(QDialog):
         layout.addLayout(btn_layout)
 
         # 回车确认
-        self.name_input.returnPressed.connect(self.url_input.setFocus)
+        if not self._edit_mode:
+            self.name_input.returnPressed.connect(self.url_input.setFocus)
         self.url_input.returnPressed.connect(self.key_input.setFocus)
         self.key_input.returnPressed.connect(self.model_input.setFocus)
         self.model_input.returnPressed.connect(self._on_confirm)
 
         # 默认焦点
-        self.name_input.setFocus()
+        if self._edit_mode:
+            self.url_input.setFocus()
+        else:
+            self.name_input.setFocus()
 
     def _on_confirm(self):
         name = self.name_input.text().strip()

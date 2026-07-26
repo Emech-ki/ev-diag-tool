@@ -4,7 +4,6 @@ AI 诊断助手对话面板 (方案C)
 """
 
 import html as html_mod
-import re
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
@@ -16,10 +15,8 @@ from PyQt6.QtGui import QTextCursor
 
 from src.engine.diagnostic import DiagnosticEngine, DiagnosticResult
 from src.ai.agent import DiagnosticAgent
+from src.ui.markdown_renderer import md_to_html
 from src.ui.styles import PRIMARY, PRIMARY_DARK, PRIMARY_BG, CARD_BORDER, CARD_BG, TEXT_PRIMARY, TEXT_SECONDARY, TEXT_MUTED, BG, WARNING, WARNING_BG
-
-# 预编译正则
-_BOLD_RE = re.compile(r'\*\*(.*?)\*\*')
 
 
 class AgentStreamWorker(QThread):
@@ -234,9 +231,13 @@ class AgentChatPanel(QWidget):
 
     def _append_message_html(self, role: str, content: str):
         """仅渲染消息到界面（不记录）"""
-        rendered = html_mod.escape(content)
-        rendered = rendered.replace('\n', '<br>')
-        rendered = _BOLD_RE.sub(r'<strong>\1</strong>', rendered)
+        if role == "assistant":
+            # AI 回复使用完整 Markdown 渲染
+            rendered = md_to_html(content)
+        else:
+            # 用户消息和系统消息只做基础转义
+            rendered = html_mod.escape(content)
+            rendered = rendered.replace('\n', '<br>')
 
         if role == "user":
             html = f"""
@@ -314,20 +315,16 @@ class AgentChatPanel(QWidget):
         self.chat_edit.ensureCursorVisible()
 
     def _finalize_stream_message(self):
-        """流式完成后，记录消息并从列表重建整个聊天（确保格式正确）"""
-        # 刷新未闭合的粗体缓冲
-        if self._pending_bold_buf:
-            escaped = html_mod.escape(self._pending_bold_buf)
-            escaped = escaped.replace('\n', '<br>')
-            cursor = self.chat_edit.textCursor()
-            cursor.movePosition(QTextCursor.MoveOperation.End)
-            cursor.insertHtml(escaped)
-            self._pending_bold_buf = ""
+        """流式完成后，用完整 Markdown 渲染重建最后一条消息"""
         if not self._stream_content:
             return
+
         # 将流式内容记录到消息列表
         self._messages.append(("assistant", self._stream_content))
-        # 从消息列表重建整个聊天显示
+        self._pending_bold_buf = ""
+
+        # 删除流式阶段的原始文本（选中最后一条消息区域并替换）
+        # 简单方案：重建整个显示
         self._rebuild_display()
 
     def _stop_worker(self):

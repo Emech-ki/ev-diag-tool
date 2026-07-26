@@ -75,23 +75,27 @@ class LLMClient:
 
     @property
     def model_name(self) -> str:
-        return self._provider.model_name
+        with self._provider_lock:
+            return self._provider.model_name
 
     @model_name.setter
     def model_name(self, name: str) -> None:
-        self._provider.model_name = name
+        with self._provider_lock:
+            self._provider.model_name = name
 
     @property
     def is_local(self) -> bool:
         """当前是否使用本地模型"""
-        return self._provider.provider_name == "ollama"
+        with self._provider_lock:
+            return self._provider.provider_name == "ollama"
 
     @property
     def current_endpoint_name(self) -> str:
         """当前端点显示名称"""
-        if self.is_local:
-            return "本地模型"
-        return getattr(self._provider, "_endpoint_name", "调用模型")
+        with self._provider_lock:
+            if self._provider.provider_name == "ollama":
+                return "本地模型"
+            return getattr(self._provider, "_endpoint_name", "调用模型")
 
     def get_remote_endpoints(self) -> List[Dict[str, Any]]:
         """获取已配置的远程端点列表"""
@@ -143,16 +147,20 @@ class LLMClient:
         return False
 
     def is_available(self) -> bool:
-        return self._provider.is_available()
+        with self._provider_lock:
+            return self._provider.is_available()
 
     def get_available_models(self) -> List[str]:
-        return self._provider.get_models()
+        with self._provider_lock:
+            return self._provider.get_models()
 
     def reset_availability(self):
-        self._provider.reset_availability()
+        with self._provider_lock:
+            self._provider.reset_availability()
 
     def set_model(self, model_name: str):
-        self._provider.model_name = model_name
+        with self._provider_lock:
+            self._provider.model_name = model_name
 
     def get_diagnostic_suggestion(
         self,
@@ -162,7 +170,9 @@ class LLMClient:
         additional_info: str = ""
     ) -> str:
         """获取 AI 诊断建议"""
-        if not self._provider.is_available():
+        with self._provider_lock:
+            provider = self._provider
+        if not provider.is_available():
             return "⚠️ AI 服务未启动，请检查后重试"
 
         prompt = self.templates.build_diagnostic_prompt(
@@ -173,7 +183,7 @@ class LLMClient:
         )
 
         try:
-            return self._provider.generate(prompt, AI_TEMPERATURE, AI_MAX_TOKENS)
+            return provider.generate(prompt, AI_TEMPERATURE, AI_MAX_TOKENS)
         except Exception as e:
             return f"⚠️ AI 诊断生成失败: {str(e)}"
 
@@ -185,7 +195,9 @@ class LLMClient:
         additional_info: str = ""
     ) -> Iterator[str]:
         """获取 AI 诊断建议（流式）"""
-        if not self._provider.is_available():
+        with self._provider_lock:
+            provider = self._provider
+        if not provider.is_available():
             yield "⚠️ AI 服务未启动，请检查后重试"
             return
 
@@ -197,13 +209,15 @@ class LLMClient:
         )
 
         try:
-            yield from self._provider.generate_stream(prompt, AI_TEMPERATURE, AI_MAX_TOKENS)
+            yield from provider.generate_stream(prompt, AI_TEMPERATURE, AI_MAX_TOKENS)
         except Exception as e:
             yield f"⚠️ AI 诊断生成失败: {str(e)}"
 
     def chat(self, message: str, context: Optional[List[Dict[str, str]]] = None) -> str:
         """与 AI Agent 对话"""
-        if not self._provider.is_available():
+        with self._provider_lock:
+            provider = self._provider
+        if not provider.is_available():
             return "⚠️ AI 服务未启动"
 
         messages = list(context) if context else []
@@ -215,13 +229,15 @@ class LLMClient:
             messages.insert(0, {"role": "system", "content": system_prompt})
 
         try:
-            return self._provider.chat(messages, AI_TEMPERATURE, AI_MAX_TOKENS)
+            return provider.chat(messages, AI_TEMPERATURE, AI_MAX_TOKENS)
         except Exception as e:
             return f"⚠️ AI 回复生成失败: {str(e)}"
 
     def chat_stream(self, message: str, context: Optional[List[Dict[str, str]]] = None) -> Iterator[str]:
         """与 AI Agent 对话（流式响应）"""
-        if not self._provider.is_available():
+        with self._provider_lock:
+            provider = self._provider
+        if not provider.is_available():
             yield "⚠️ AI 服务未启动"
             return
 
@@ -234,7 +250,7 @@ class LLMClient:
             messages.insert(0, {"role": "system", "content": system_prompt})
 
         try:
-            yield from self._provider.chat_stream(messages, AI_TEMPERATURE, AI_MAX_TOKENS)
+            yield from provider.chat_stream(messages, AI_TEMPERATURE, AI_MAX_TOKENS)
         except Exception as e:
             yield f"⚠️ AI 回复生成失败: {str(e)}"
 
@@ -257,11 +273,13 @@ class LLMClient:
         Returns:
             {"content": "...", "tool_calls": [...]} 或 {"content": "..."}
         """
-        if not self._provider.is_available():
+        with self._provider_lock:
+            provider = self._provider
+        if not provider.is_available():
             return {"content": "⚠️ AI 服务未启动", "tool_calls": None}
 
         try:
-            return self._provider.chat_with_tools(
+            return provider.chat_with_tools(
                 messages, tools,
                 temperature if temperature is not None else AI_TEMPERATURE,
                 max_tokens if max_tokens is not None else AI_MAX_TOKENS,
@@ -282,13 +300,15 @@ class LLMClient:
         Yields:
             StreamEvent: content → tool_calls → done
         """
-        if not self._provider.is_available():
+        with self._provider_lock:
+            provider = self._provider
+        if not provider.is_available():
             yield StreamEvent("content", content="⚠️ AI 服务未启动")
             yield StreamEvent("done")
             return
 
         try:
-            yield from self._provider.chat_with_tools_stream(
+            yield from provider.chat_with_tools_stream(
                 messages, tools,
                 temperature if temperature is not None else AI_TEMPERATURE,
                 max_tokens if max_tokens is not None else AI_MAX_TOKENS,

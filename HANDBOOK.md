@@ -1,102 +1,111 @@
 # Handoff Document — EV-Diag-Tool
 
-**Date:** 2026-07-25
+**Date:** 2026-07-26
 **Project:** `D:\桌面\诊断ai程序\ev-diag-tool`
 **Repo:** https://github.com/Emech-ki/ev-diag-tool.git
 **Version:** v3.1.0 — Streaming Tool Calling
-**Tests:** 85 passed (unit) + 41 passed (verification)
+**Tests:** 85 passed (unit) + 42 passed (verification)
 **Database:** 8729 fault codes (100% 中文) + 45 vehicle models
 
 ---
 
 ## 本次会话完成的工作
 
-### 1. 故障码数据库全量中文翻译（2026-07-25）
+### 1. 数据库验证与分析（2026-07-26）
 
-将 8729 条故障码的英文描述翻译为专业中文，翻译率从 3.4% 提升到 100%。
+对现有数据库进行全面验证，确认数据完整性。
 
-| 文件 | 总数 | 翻译前纯中文 | 翻译后纯中文 |
-|------|------|-------------|-------------|
-| p_codes.csv | 6553 | 130 (2%) | 6553 (100%) |
-| b_codes.csv | 360 | 69 (19%) | 360 (100%) |
-| c_codes.csv | 525 | 26 (5%) | 525 (100%) |
-| u_codes.csv | 1231 | 34 (3%) | 1231 (100%) |
-| ev_codes.csv | 60 | 39 (65%) | 60 (100%) |
+#### 关键发现
 
-**翻译方法：** 使用多个并行 Task 代理进行 AI 翻译，分批处理（每批 ~200 条），经过 3 轮翻译 + 修复：
-- 第1轮：7个并行 Task 翻译 8667 条 description
-- 第2轮：2个并行 Task 修复 1529 条未翻译的 C/U 系列
-- 第3轮：2个并行 Task 修复 1008 条翻译损坏的条目
+| 项目 | 之前假设 | 实际数据 |
+|------|---------|----------|
+| Wal33D 数据库 | 28,220+ 条 | **8,581 条** |
+| 当前数据库 | 8,729 条 | 8,729 条 ✅ |
+| 需要补全 | ~19,000+ 条 | **0 条**（已合并） |
+| 翻译状态 | 需要翻译 | **100% 已完成** |
 
-**翻译规则：**
-- 保留标准缩写：EGR、EVAP、ABS、CAN、HO2S、O2、MAP、MAF 等
-- Bank 1 = 第一排, Bank 2 = 第二排
-- Circuit/Open = 电路/开路, Circuit Low = 电路电压过低
-- Range/Performance = 范围/性能, Intermittent/Erratic = 间歇性/不稳定
+#### 数据完整性检查
 
-### 2. 全链路流式 Tool Calling 实现（2026-07-25）
+| 检查项 | 状态 | 详情 |
+|--------|------|------|
+| 单元测试 | ✅ 85/85 通过 | 全部通过 |
+| 功能验证 | ✅ 42/42 通过 | 修复1个测试bug |
+| 必填字段 | ✅ 通过 | 无空 code 或 description |
+| 严重程度值 | ✅ 通过 | low/medium/high/critical |
+| JSON 字段 | ✅ 通过 | 所有 JSON 字段有效 |
+| 车型数据 | ✅ 45款/18品牌 | 数据完整 |
 
-将 AI Agent 对话从"伪流式"（等待全部完成后一次性显示）升级为"全链路流式"（逐 token 实时显示）。
+#### EV 码存储说明
 
-#### 改动的文件（6个）
+ev_codes.csv 的60个故障码与 p_codes.csv 重叠（P0Axx/P0Bxx/P0Cxx）。导入时 ev_codes 会覆盖 p_codes 的同名条目，因为 ev_codes 有更详细的信息（common_causes、diagnostic_steps 等）。这是**设计如此**，不是 bug。
 
-**`src/ai/providers/__init__.py`**
-- 新增 `StreamEvent` 数据类（type: "content" | "tool_calls" | "done"）
-- 新增 `chat_with_tools_stream` 默认实现（回退到非流式）
+### 2. 测试 Bug 修复（2026-07-26）
 
-**`src/ai/providers/ollama.py`**
-- 实现 `chat_with_tools_stream`：Ollama NDJSON 流式解析
-- Ollama 流式模式下 tool_calls 在单个 chunk 中完整返回（非增量）
+**文件：** `scripts/verify_features.py`
 
-**`src/ai/providers/openai_compat.py`**
-- 实现 `chat_with_tools_stream`：OpenAI SSE 流式解析
-- 增量 tool_calls 按 index 缓冲拼接（name + arguments 片段）
-- `tool_calls_detected` 标志防止检测到 tool_calls 后继续 yield content
+**修改：** `test_tool_vehicle_info` 函数
 
-**`src/ai/llm_client.py`**
-- 新增 `chat_with_tools_stream` 代理方法，转发到当前 provider
+- **修复前：** 期望车型表为空（`assert r["found"] is False`）
+- **修复后：** 期望车型表有数据（`assert r["found"] is True`），并验证 `common_codes` 字段存在
 
-**`src/ai/agent.py`**
-- 新增 `run_stream` 方法：流式 ReAct 循环入口
-- 新增 `_run_react_loop_stream` 方法：流式版本的工具调用循环
-- 重写 `chat_stream`：调用 `run_stream` 而非伪流式 `yield self.run()`
+### 3. 数据质量分析（2026-07-26）
 
-**`src/ui/agent_chat.py`**
-- `AgentStreamWorker.run()` 改为消费 `StreamEvent`，逐 token emit
-- `_stop_worker` 增加强制终止机制（terminate + wait）
+分析现有8729条故障码的数据质量：
 
-#### 数据流
+| 字段 | 填充率 | 说明 |
+|------|--------|------|
+| description | 100% | ✅ 全部中文 |
+| detail | 3.3% | ⚠️ 只有284条 |
+| common_causes | 3.3% | ⚠️ 只有284条 |
+| diagnostic_steps | 3.3% | ⚠️ 只有284条 |
+| related_codes | 3.3% | ⚠️ 只有284条 |
+| symptoms | 2.4% | ⚠️ 只有212条 |
 
-```
-用户输入
-    ↓
-AgentStreamWorker.run()  (QThread 子线程)
-    ↓
-agent.run_stream(message)  →  Iterator[StreamEvent]
-    ↓
-llm.chat_with_tools_stream(messages, tools)
-    ↓ (逐 token)
-StreamEvent("content", "你")  →  chunk.emit("你")  →  _append_stream_token()
-StreamEvent("content", "好")  →  chunk.emit("好")  →  _append_stream_token()
-...
-StreamEvent("tool_calls", [...])  →  执行工具  →  on_tool_call()  →  UI显示"🔍 查询故障码"
-StreamEvent("content", "根据")  →  chunk.emit("根据")  →  _append_stream_token()
-...
-StreamEvent("done")  →  finished.emit()  →  _finalize_stream_message()
-```
+### 4. 高频码数据增强（2026-07-26）
 
-#### Bug 修复（3项）
+为24个高频故障码补充详细的诊断信息。
 
-| # | 文件 | Bug | 修复 |
-|---|------|-----|------|
-| 1 | `ollama.py:284` | 冗余循环导入 `from src.ai.providers import StreamEvent as SE`，与顶部导入冲突 | 删除冗余导入，统一使用 `StreamEvent` |
-| 2 | `openai_compat.py:340` | `finish_reason == "tool_calls"` 的 `break` 只跳出内层 `while` 循环，外层 `for` 继续读取可能 yield 多余 content | 添加 `tool_calls_detected` 标志，双层 break |
-| 3 | `openai_compat.py:288` | `content_buf` 变量累积但从未使用 | 删除未使用变量 |
+#### 增强的故障码
 
-### 3. Git 提交
+**EV/BMS 系统（13个）：**
+- P0A00-P0A06：冷却系统相关（温度传感器、水泵）
+- P0A09：DC/DC转换器
+- P0A0E/P0A0F：高压联锁电路
+- P0A16/P0A1F：电池能量控制模块
+- P0A30：电机温度传感器
 
-- **Commit:** `0a42d31` — "feat: 全链路流式Tool Calling + 8729条故障码中文翻译"
-- **Push:** 已推送到 `origin/master`
+**发动机系统（11个）：**
+- P0420/P0430：催化器效率
+- P0440-P0455：EVAP系统（蒸发排放）
+- P0500：车速传感器
+- P0505：怠速控制
+- P0562：系统电压
+- P0600/P0606：ECU故障
+
+#### 增强内容
+
+每个故障码新增：
+- `detail`：详细说明（系统原理、故障含义）
+- `severity`：严重程度（已更新为更准确的级别）
+- `common_causes`：常见原因（5-6个）
+- `diagnostic_steps`：诊断步骤（5-7步）
+- `related_codes`：相关故障码
+- `symptoms`：可观测症状（3-4个）
+
+#### 增强效果
+
+| 项目 | 增强前 | 增强后 | 变化 |
+|------|--------|--------|------|
+| detail | 284 (3.3%) | 308 (3.5%) | +24 |
+| common_causes | 284 (3.3%) | 308 (3.5%) | +24 |
+| diagnostic_steps | 284 (3.3%) | 308 (3.5%) | +24 |
+| related_codes | 284 (3.3%) | 308 (3.5%) | +24 |
+| symptoms | 212 (2.4%) | 236 (2.7%) | +24 |
+
+#### 新增文件
+
+- `data/seed/priority_enhancement.json` — 增强数据源（24个故障码的详细信息）
+- `scripts/enhance_priority_codes.py` — 增强脚本（读取JSON并更新数据库）
 
 ---
 
@@ -156,15 +165,46 @@ StreamEvent("done")  →  finished.emit()  →  _finalize_stream_message()
 4. "冷车启动抖动"搜不到 P0300 — 症状关键词映射
 5. 4xx 错误重试 4 次 — 4xx 不重试
 
+### 全链路流式 Tool Calling（v3.1.0）
+
+#### 改动的文件（6个）
+
+**`src/ai/providers/__init__.py`**
+- 新增 `StreamEvent` 数据类
+- 新增 `chat_with_tools_stream` 默认实现
+
+**`src/ai/providers/ollama.py`**
+- 实现 `chat_with_tools_stream`：Ollama NDJSON 流式解析
+
+**`src/ai/providers/openai_compat.py`**
+- 实现 `chat_with_tools_stream`：OpenAI SSE 流式解析
+- 增量 tool_calls 按 index 缓冲拼接
+
+**`src/ai/llm_client.py`**
+- 新增 `chat_with_tools_stream` 代理方法
+
+**`src/ai/agent.py`**
+- 新增 `run_stream` 方法：流式 ReAct 循环入口
+- 新增 `_run_react_loop_stream` 方法
+
+**`src/ui/agent_chat.py`**
+- `AgentStreamWorker.run()` 改为消费 `StreamEvent`
+
+#### Bug 修复（3项）
+1. Ollama 冗余循环导入
+2. OpenAI `finish_reason == "tool_calls"` break 问题
+3. 未使用变量 `content_buf`
+
 ---
 
 ## 当前项目状态
 
 - **版本：** v3.1.0 — Streaming Tool Calling
-- **阶段：** 阶段三增强 — 全链路流式 + 翻译完成
-- **测试：** 85 单元测试 + 41 功能验证，全部通过
+- **阶段：** 阶段三增强 — 全链路流式 + 翻译完成 + 数据增强
+- **测试：** 85 单元测试 + 42 功能验证，全部通过
 - **数据库：** 8729 故障码（100% 中文） + 45 车型
-- **已修复问题：** 32 项（29 + 3 流式相关）
+- **数据质量：** 308 条有详细诊断信息（+24 本次增强）
+- **已修复问题：** 33 项（32 + 1 测试 bug）
 
 ## 核心架构
 
@@ -185,11 +225,12 @@ StreamEvent("done")  →  finished.emit()  →  _finalize_stream_message()
 
 ## 建议的下一步工作
 
-1. **补全故障码** — 下载 Wal33D 数据库，补全 18,805 条厂商自定义码
-2. **编辑端点功能** — 右键菜单增加"编辑"
-3. **多 Agent 协作** — 主 Agent + 专家子 Agent（BMS/电机/热管理）
-4. **UI 优化** — Markdown 渲染增强、诊断结果导出
-5. **实际运行测试** — 用 Ollama/OpenAI 测试流式输出效果
+1. **继续数据增强** — 为更多故障码补充详细信息（当前只有308/8729有详细信息）
+2. **AI批量生成** — 使用AI批量生成剩余故障码的详细信息
+3. **编辑端点功能** — 右键菜单增加"编辑"
+4. **多 Agent 协作** — 主 Agent + 专家子 Agent（BMS/电机/热管理）
+5. **UI 优化** — Markdown 渲染增强、诊断结果导出
+6. **实际运行测试** — 用 Ollama/OpenAI 测试流式输出效果
 
 ---
 
@@ -198,3 +239,16 @@ StreamEvent("done")  →  finished.emit()  →  _finalize_stream_message()
 - `.env` 文件已通过 `.gitignore` 排除
 - Ollama 默认配置：`http://localhost:11434`，模型 `qwen2.5:7b`
 - OpenAI API Key 未配置（需用户自行填写 `.env`）
+
+## 关键文件
+
+| 文件 | 说明 |
+|------|------|
+| `HANDBOOK.md` | 本文档（交接文档） |
+| `CLAUDE.md` | Claude Code 项目规范 |
+| `README.md` | 项目完整蓝图和设计决策 |
+| `data/seed/priority_enhancement.json` | 高频码增强数据源 |
+| `scripts/enhance_priority_codes.py` | 数据增强脚本 |
+| `scripts/verify_features.py` | 功能验证脚本（42个用例） |
+| `scripts/merge_official_codes.py` | 官方故障码合并脚本 |
+| `scripts/translate_codes_v2.py` | 故障码翻译脚本 |

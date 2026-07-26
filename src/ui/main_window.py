@@ -61,7 +61,7 @@ from src.ui.styles import (
 )
 
 from src.version import VERSION_LINE
-from src.config import AI_PROVIDER, append_endpoint_to_env, remove_endpoint_from_env
+from src.config import AI_PROVIDER, append_endpoint_to_env, remove_endpoint_from_env, update_endpoint_in_env
 from src.ui.add_endpoint_dialog import AddEndpointDialog
 
 
@@ -363,12 +363,14 @@ class MainWindow(QMainWindow):
 
         self.result_panel = ResultPanel()
         self.result_panel.diagnose_requested.connect(self._on_related_code_clicked)
+        self.result_panel.export_requested.connect(self._export_current_result)
         self.tab_widget.addTab(self.result_panel, "诊断结果")
 
         self.agent_panel = AgentChatPanel(self.engine)
         self.tab_widget.addTab(self.agent_panel, "AI 助手")
 
         self.history_panel = HistoryPanel(self.engine.kb.db)
+        self.history_panel.export_requested.connect(self._export_history_record)
         self.tab_widget.addTab(self.history_panel, "历史记录")
 
         content_layout.addWidget(self.tab_widget, 1)
@@ -533,10 +535,13 @@ class MainWindow(QMainWindow):
             return
 
         menu = QMenu(self)
+        edit_action = menu.addAction(f"编辑 \"{text}\"")
         delete_action = menu.addAction(f"删除 \"{text}\"")
         action = menu.exec(self.cursor().pos())
 
-        if action == delete_action:
+        if action == edit_action:
+            self._edit_endpoint(text)
+        elif action == delete_action:
             self._delete_endpoint(text)
 
     def _delete_endpoint(self, name: str):
@@ -562,6 +567,51 @@ class MainWindow(QMainWindow):
             self.status_bar.showMessage(f"已删除远程模型: {name}")
         except Exception as e:
             QMessageBox.warning(self, "删除失败", f"删除端点失败:\n{e}")
+
+    def _edit_endpoint(self, name: str):
+        """编辑指定的远程端点"""
+        # 从 .env 读取现有配置
+        from src.config import get_remote_endpoints
+        endpoints = get_remote_endpoints()
+        endpoint_data = None
+        for ep in endpoints:
+            if ep["name"] == name:
+                endpoint_data = ep
+                break
+
+        if not endpoint_data:
+            QMessageBox.warning(self, "错误", f"未找到端点 \"{name}\" 的配置")
+            return
+
+        # 记住当前选中项
+        prev_index = self.provider_selector.currentIndex()
+
+        dialog = AddEndpointDialog(self, endpoint_data=endpoint_data)
+        if dialog.exec() == AddEndpointDialog.DialogCode.Accepted and dialog.get_result():
+            data = dialog.get_result()
+            try:
+                update_endpoint_in_env(
+                    endpoint_name=name,
+                    new_url=data["base_url"],
+                    new_key=data["api_key"],
+                    new_model=data["model_name"],
+                )
+                # 如果当前正在使用该端点，重新切换刷新
+                if self.provider_selector.currentText() == name:
+                    self.engine.llm.switch_to_remote(name)
+                    self._refresh_model_list()
+                # 刷新下拉框
+                self._init_provider_selector()
+                # 恢复选中项
+                for i in range(self.provider_selector.count()):
+                    if self.provider_selector.itemText(i) == name:
+                        self.provider_selector.setCurrentIndex(i)
+                        break
+                self.status_bar.showMessage(f"已更新远程模型: {name}")
+            except Exception as e:
+                QMessageBox.warning(self, "保存失败", f"更新 .env 文件失败:\n{e}")
+                self._init_provider_selector()
+                self.provider_selector.setCurrentIndex(prev_index)
 
     def _refresh_model_list(self):
         """刷新当前 provider 的模型列表"""
@@ -754,7 +804,11 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(0, lambda: self._do_related_code_lookup(code))
 
     def _do_related_code_lookup(self, code: str):
-        """实际执行相关码查询（延迟到 Qt 完成点击处理后）"""
+        """实际执行相关码查询（延迟到 Qt 完成点击处理后）
+
+        注意：SQLite 单条索引查询 <1ms，在主线程执行可接受。
+        已通过 QTimer.singleShot(0, ...) 延迟到事件循环执行。
+        """
         knowledge = self.engine.kb.lookup(code)
         if knowledge:
             result = DiagnosticResult(
@@ -807,3 +861,109 @@ class MainWindow(QMainWindow):
         self.search_btn.setEnabled(True)
         self.search_btn.setText("诊断")
         self.status_bar.showMessage(f"诊断异常: {error_msg}")
+
+    def _export_current_result(self):
+        """导出当前诊断结果"""
+        from PyQt6.QtWidgets import QFileDialog
+        from src.ui.export_utils import export_as_text, export_as_html
+
+        result = self.result_panel.get_current_result()
+        if not result:
+            QMessageBox.warning(self, "导出", "没有可导出的诊断结果")
+            return
+
+        vehicle = self._get_vehicle_info()
+        symptom = self.symptom_input.text().strip()
+
+        # 默认文件名
+        default_name = f"诊断报告_{result.code}_{result.timestamp.replace(':', '-').replace(' ', '_')}"
+
+        # 文件保存对话框
+        file_path, selected_filter = QFileDialog.getSaveFileName(
+            self, "导出诊断报告",
+            default_name,
+            "文本文件 (*.txt);;HTML 文件 (*.html)"
+        )
+        if not file_path:
+            return
+
+        try:
+            if file_path.endswith(".html"):
+                content = export_as_html(
+                    code=result.code,
+                    knowledge=result.knowledge,
+                    ai_suggestion=result.ai_suggestion,
+                    vehicle_info=vehicle,
+                    symptoms=symptom,
+                    timestamp=result.timestamp,
+                )
+            else:
+                if not file_path.endswith(".txt"):
+                    file_path += ".txt"
+                content = export_as_text(
+                    code=result.code,
+                    knowledge=result.knowledge,
+                    ai_suggestion=result.ai_suggestion,
+                    vehicle_info=vehicle,
+                    symptoms=symptom,
+                    timestamp=result.timestamp,
+                )
+
+            with open(file_path, "w", encoding="utf-8") as f:
+                f.write(content)
+
+            self.status_bar.showMessage(f"诊断报告已导出: {file_path}")
+        except Exception as e:
+            QMessageBox.warning(self, "导出失败", f"导出诊断报告失败:\n{e}")
+
+    def _export_history_record(self, record: dict):
+        """导出历史记录的诊断报告"""
+        from PyQt6.QtWidgets import QFileDialog
+        from src.ui.export_utils import export_as_text, export_as_html
+
+        code = record.get("code", "")
+        if not code:
+            return
+
+        # 重新查询知识库获取完整数据
+        knowledge = self.engine.kb.lookup(code)
+
+        vehicle_info = record.get("vehicle_info", "")
+        symptoms = record.get("symptoms", "")
+        ai_suggestion = record.get("ai_suggestion", "")
+        timestamp = record.get("created_at", "")
+
+        default_name = f"诊断报告_{code}_{timestamp.replace(':', '-').replace(' ', '_')[:15]}"
+
+        file_path, selected_filter = QFileDialog.getSaveFileName(
+            self, "导出诊断报告",
+            default_name,
+            "文本文件 (*.txt);;HTML 文件 (*.html)"
+        )
+        if not file_path:
+            return
+
+        try:
+            if file_path.endswith(".html"):
+                content = export_as_html(
+                    code=code, knowledge=knowledge,
+                    ai_suggestion=ai_suggestion or None,
+                    vehicle_info=vehicle_info, symptoms=symptoms,
+                    timestamp=timestamp,
+                )
+            else:
+                if not file_path.endswith(".txt"):
+                    file_path += ".txt"
+                content = export_as_text(
+                    code=code, knowledge=knowledge,
+                    ai_suggestion=ai_suggestion or None,
+                    vehicle_info=vehicle_info, symptoms=symptoms,
+                    timestamp=timestamp,
+                )
+
+            with open(file_path, "w", encoding="utf-8") as f:
+                f.write(content)
+
+            self.status_bar.showMessage(f"诊断报告已导出: {file_path}")
+        except Exception as e:
+            QMessageBox.warning(self, "导出失败", f"导出诊断报告失败:\n{e}")

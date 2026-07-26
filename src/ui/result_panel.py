@@ -5,7 +5,7 @@
 
 import html
 import json
-import re
+from typing import Optional
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
@@ -16,6 +16,7 @@ from PyQt6.QtGui import QTextCursor
 
 from src.engine.diagnostic import DiagnosticResult
 from src.engine.knowledge_base import KnowledgeBase
+from src.ui.markdown_renderer import md_to_html
 from src.ui.styles import (
     PRIMARY, PRIMARY_DARK, PRIMARY_BG, CARD_BG, CARD_BORDER,
     TEXT_PRIMARY, TEXT_SECONDARY, TEXT_MUTED, BG, FONT_MONO,
@@ -34,11 +35,13 @@ class ResultPanel(QWidget):
     """诊断结果展示面板"""
 
     diagnose_requested = pyqtSignal(str)
+    export_requested = pyqtSignal()  # 导出按钮点击信号
 
     def __init__(self):
         super().__init__()
         self.kb = KnowledgeBase()
         self._current_code = None
+        self._current_result = None  # 保存当前诊断结果（用于导出）
         self._ai_stream_started = False
         self._ai_stream_content = ""
         self._init_ui()
@@ -144,6 +147,20 @@ class ResultPanel(QWidget):
         symptom_title.setStyleSheet(f"font-size: 13px; font-weight: bold; color: #558B2F;")
         symptom_header.addWidget(symptom_title)
         symptom_header.addStretch()
+
+        self.export_btn = QPushButton("导出报告")
+        self.export_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.export_btn.setStyleSheet(f"""
+            QPushButton {{
+                font-size: 12px;
+                background-color: {PRIMARY_BG}; color: {PRIMARY};
+                border: 1px solid {PRIMARY}; border-radius: 4px;
+                padding: 2px 12px; min-height: 24px;
+            }}
+            QPushButton:hover {{ background-color: {PRIMARY}; color: white; }}
+        """)
+        self.export_btn.clicked.connect(self.export_requested.emit)
+        symptom_header.addWidget(self.export_btn)
         symptom_layout.addLayout(symptom_header)
 
         self.symptom_display = QLabel()
@@ -242,9 +259,14 @@ class ResultPanel(QWidget):
         self._ai_stream_started = False
         self._ai_stream_content = ""
 
+    def get_current_result(self) -> Optional[DiagnosticResult]:
+        """获取当前诊断结果（用于导出）"""
+        return self._current_result
+
     def show_result(self, result: DiagnosticResult):
         """显示诊断结果"""
         self.clear()
+        self._current_result = result
 
         self._current_code = result.code if result.has_knowledge() else None
         self._refresh_symptoms_display()
@@ -267,6 +289,7 @@ class ResultPanel(QWidget):
     def show_kb_result(self, result: DiagnosticResult):
         """仅显示知识库结果，AI 区域显示加载/不可用状态"""
         self.clear()
+        self._current_result = result
 
         self._current_code = result.code if result.has_knowledge() else None
         self._refresh_symptoms_display()
@@ -286,6 +309,7 @@ class ResultPanel(QWidget):
     def show_lookup_result(self, result: DiagnosticResult):
         """快速查询展示（用于相关码跳转），只显示知识库，不显示 AI 状态"""
         self.clear()
+        self._current_result = result
 
         self._current_code = result.code if result.has_knowledge() else None
         self._refresh_symptoms_display()
@@ -298,15 +322,15 @@ class ResultPanel(QWidget):
         self.knowledge_browser.setHtml(kb_html)
 
     def append_ai_text(self, token: str):
-        """追加 AI 流式 token 到 AI 浏览器"""
+        """追加 AI 流式 token 到 AI 浏览器（基础渲染，完成后会重建）"""
         if not self._ai_stream_started:
             self.ai_browser.clear()
             self._ai_stream_started = True
             self._ai_stream_content = ""
 
         self._ai_stream_content += token
-        escaped = token.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
-        escaped = re.sub(r'\*\*(.*?)\*\*', r'<strong>\1</strong>', escaped)
+        # 流式阶段用基础转义，不做完整 Markdown 渲染（避免跨 token 问题）
+        escaped = html.escape(token)
         escaped = escaped.replace('\n', '<br>')
 
         cursor = self.ai_browser.textCursor()
@@ -315,13 +339,11 @@ class ResultPanel(QWidget):
         self.ai_browser.ensureCursorVisible()
 
     def finalize_ai_suggestion(self, code: str, full_text: str, timestamp: str = ""):
-        """AI 流式完成，重建完整格式化的 HTML"""
+        """AI 流式完成，用完整 Markdown 渲染重建 HTML"""
         if not full_text:
             return
 
-        suggestion = html.escape(full_text)
-        suggestion = re.sub(r'\*\*(.*?)\*\*', r'<strong>\1</strong>', suggestion)
-        suggestion = suggestion.replace('\n', '<br>')
+        rendered = md_to_html(full_text)
 
         self.ai_browser.setHtml(f"""
             <div style="font-family: 'Microsoft YaHei UI', sans-serif;">
@@ -330,7 +352,7 @@ class ResultPanel(QWidget):
                     <span style="float: right;">{timestamp}</span>
                 </div>
                 <div style="color: {TEXT_PRIMARY}; line-height: 1.7; font-size: 14px;">
-                    {suggestion}
+                    {rendered}
                 </div>
                 <div style="margin-top: 16px; padding: 10px 14px; background-color: {WARNING_BG};
                             border-radius: 6px; font-size: 12px; color: {WARNING};">
@@ -454,9 +476,9 @@ class ResultPanel(QWidget):
             related = [r.strip() for r in related.split(",") if r.strip()]
         if related:
             chips = " ".join(
-                f'<a href="dtc://{r}" style="text-decoration: none; '
+                f'<a href="dtc://{html.escape(r)}" style="text-decoration: none; '
                 f'background-color: {PRIMARY_BG}; color: {PRIMARY}; '
-                f'font-family: Consolas; font-size: 12px; padding: 2px 10px; border-radius: 4px;">{r}</a>'
+                f'font-family: Consolas; font-size: 12px; padding: 2px 10px; border-radius: 4px;">{html.escape(r)}</a>'
                 for r in related
             )
             kb_html += f"""
@@ -493,9 +515,7 @@ class ResultPanel(QWidget):
     def _build_ai_html(self, result: DiagnosticResult) -> str:
         """构建 AI 建议的 HTML"""
         suggestion = result.ai_suggestion or ""
-        suggestion = html.escape(suggestion)
-        suggestion = re.sub(r'\*\*(.*?)\*\*', r'<strong>\1</strong>', suggestion)
-        suggestion = suggestion.replace('\n', '<br>')
+        rendered = md_to_html(suggestion)
 
         return f"""
         <div style="font-family: 'Microsoft YaHei UI', sans-serif;">
@@ -504,7 +524,7 @@ class ResultPanel(QWidget):
                 <span style="float: right;">{result.timestamp}</span>
             </div>
             <div style="color: {TEXT_PRIMARY}; line-height: 1.7; font-size: 14px;">
-                {suggestion}
+                {rendered}
             </div>
             <div style="margin-top: 16px; padding: 10px 14px; background-color: {WARNING_BG};
                         border-radius: 6px; font-size: 12px; color: {WARNING};">

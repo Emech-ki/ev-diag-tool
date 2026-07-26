@@ -27,8 +27,14 @@ class OpenAICompatProvider(LLMProvider):
         self._api_key = api_key or OPENAI_API_KEY
         base = (base_url or OPENAI_BASE_URL).rstrip("/")
         # 自动补全 /v1 后缀（用户可能只填了 https://api.deepseek.com）
-        if not base.endswith("/v1"):
-            base = base + "/v1"
+        # 如果 URL 已经包含版本路径（如 /v1、/v2）或自定义路径，则不追加
+        if not any(base.endswith(suffix) for suffix in ("/v1", "/v2")):
+            # 检查是否已有自定义路径（非域名根路径）
+            from urllib.parse import urlparse
+            parsed = urlparse(base)
+            # 只有根路径或空路径时才追加 /v1
+            if parsed.path in ("", "/"):
+                base = base + "/v1"
         self._base_url = base
         self._model_name = model_name or OPENAI_MODEL_NAME
         self._available = None

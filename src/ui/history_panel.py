@@ -6,9 +6,9 @@
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QLineEdit, QPushButton, QTableWidget, QTableWidgetItem,
-    QHeaderView, QMessageBox, QAbstractItemView, QFrame
+    QHeaderView, QMessageBox, QAbstractItemView, QFrame, QMenu
 )
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QFont
 
 from src.database.db_manager import DatabaseManager
@@ -22,9 +22,12 @@ from src.ui.styles import (
 class HistoryPanel(QWidget):
     """诊断历史记录面板"""
 
+    export_requested = pyqtSignal(dict)  # 导出历史记录信号，传递记录数据
+
     def __init__(self, db: DatabaseManager):
         super().__init__()
         self.db = db
+        self._records = []  # 缓存当前显示的记录
         self._init_ui()
         self.refresh()
 
@@ -120,6 +123,8 @@ class HistoryPanel(QWidget):
             }}
         """)
         self.table.verticalHeader().setVisible(False)
+        self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.table.customContextMenuRequested.connect(self._on_context_menu)
         layout.addWidget(self.table, 1)
 
         # ── Stats ──
@@ -142,6 +147,7 @@ class HistoryPanel(QWidget):
 
     def _populate_table(self, records: list):
         """填充表格"""
+        self._records = records  # 缓存记录用于右键菜单
         self.table.setRowCount(len(records))
 
         for i, record in enumerate(records):
@@ -178,3 +184,19 @@ class HistoryPanel(QWidget):
         if reply == QMessageBox.StandardButton.Yes:
             self.db.clear_history()
             self.refresh()
+
+    def _on_context_menu(self, pos):
+        """右键菜单"""
+        row = self.table.rowAt(pos.y())
+        if row < 0 or row >= len(self._records):
+            return
+
+        record = self._records[row]
+        code = record.get("code", "")
+
+        menu = QMenu(self)
+        export_action = menu.addAction(f"导出 \"{code}\" 的诊断报告")
+        action = menu.exec(self.table.mapToGlobal(pos))
+
+        if action == export_action:
+            self.export_requested.emit(record)
