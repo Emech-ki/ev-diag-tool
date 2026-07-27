@@ -219,6 +219,34 @@ class TestDatabaseManager(unittest.TestCase):
         records = self.db.get_history()
         self.assertEqual(len(records), 0)
 
+    def test_query_by_codes_multiple(self):
+        """测试批量查询多个故障码"""
+        results = self.db.query_by_codes(["P0300", "B1100"])
+        self.assertEqual(len(results), 2)
+        self.assertIn("P0300", results)
+        self.assertIn("B1100", results)
+        self.assertEqual(results["P0300"]["system"], "P")
+        self.assertEqual(results["B1100"]["system"], "B")
+
+    def test_query_by_codes_partial_found(self):
+        """测试批量查询部分找到的情况"""
+        results = self.db.query_by_codes(["P0300", "NONEXIST"])
+        self.assertEqual(len(results), 1)
+        self.assertIn("P0300", results)
+        self.assertNotIn("NONEXIST", results)
+
+    def test_query_by_codes_empty(self):
+        """测试批量查询空列表"""
+        results = self.db.query_by_codes([])
+        self.assertEqual(len(results), 0)
+
+    def test_query_by_codes_case_insensitive(self):
+        """测试批量查询大小写不敏感"""
+        results = self.db.query_by_codes(["p0300", "b1100"])
+        self.assertEqual(len(results), 2)
+        self.assertIn("P0300", results)
+        self.assertIn("B1100", results)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -187,6 +187,31 @@ class LLMClient:
         except Exception as e:
             return f"⚠️ AI 诊断生成失败: {str(e)}"
 
+    def get_multi_code_analysis(
+        self,
+        codes: List[str],
+        knowledge_list: List[Dict[str, Any]],
+        vehicle_info: str = "",
+        additional_info: str = ""
+    ) -> str:
+        """获取多故障码综合分析"""
+        with self._provider_lock:
+            provider = self._provider
+        if not provider.is_available():
+            return "⚠️ AI 服务未启动，请检查后重试"
+
+        prompt = self.templates.build_multi_code_diagnostic_prompt(
+            codes=codes,
+            knowledge_list=knowledge_list,
+            vehicle_info=vehicle_info,
+            additional_info=additional_info
+        )
+
+        try:
+            return provider.generate(prompt, AI_TEMPERATURE, AI_MAX_TOKENS)
+        except Exception as e:
+            return f"⚠️ AI 综合分析生成失败: {str(e)}"
+
     def get_diagnostic_suggestion_stream(
         self,
         code: str,

@@ -77,6 +77,7 @@ class TestLLMClientConfig(unittest.TestCase):
 
     def test_create_provider_factory(self):
         """测试 Provider 工厂函数"""
+        from unittest.mock import patch
         from src.ai.llm_client import create_provider
 
         ollama = create_provider("ollama")
@@ -85,9 +86,10 @@ class TestLLMClientConfig(unittest.TestCase):
         openai = create_provider("openai")
         self.assertEqual(openai.provider_name, "openai")
 
-        # 默认返回 ollama
-        default = create_provider()
-        self.assertEqual(default.provider_name, "ollama")
+        # 默认返回 ollama（mock 模块级变量确保测试隔离）
+        with patch("src.ai.llm_client.AI_PROVIDER", "ollama"):
+            default = create_provider()
+            self.assertEqual(default.provider_name, "ollama")
 
 
 class TestPromptTemplates(unittest.TestCase):

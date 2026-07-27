@@ -53,6 +53,7 @@ class ResultPanel(QWidget):
         layout.setSpacing(8)
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
+        self._splitter = splitter
         splitter.setStyleSheet(f"""
             QSplitter::handle {{
                 background-color: {CARD_BORDER};
@@ -89,6 +90,7 @@ class ResultPanel(QWidget):
         ai_layout.setSpacing(8)
 
         ai_header = QFrame()
+        self._ai_header = ai_header
         ai_header.setStyleSheet(f"""
             QFrame {{
                 background-color: {PRIMARY_BG};
@@ -99,6 +101,7 @@ class ResultPanel(QWidget):
         ai_header_layout.setContentsMargins(12, 8, 12, 8)
 
         ai_title = QLabel("AI 诊断建议")
+        self._ai_title = ai_title
         ai_title.setStyleSheet(f"font-size: 14px; font-weight: bold; color: {PRIMARY};")
         ai_header_layout.addWidget(ai_title)
 
@@ -131,6 +134,7 @@ class ResultPanel(QWidget):
         # === 现象录入区 ===
         symptom_card = QFrame()
         symptom_card.setObjectName("card")
+        self._symptom_card = symptom_card
         symptom_card.setStyleSheet(f"""
             QFrame#card {{
                 background-color: #F9FBE7;
@@ -144,6 +148,7 @@ class ResultPanel(QWidget):
 
         symptom_header = QHBoxLayout()
         symptom_title = QLabel("记录观察到的现象")
+        self._symptom_title = symptom_title
         symptom_title.setStyleSheet(f"font-size: 13px; font-weight: bold; color: #558B2F;")
         symptom_header.addWidget(symptom_title)
         symptom_header.addStretch()
@@ -529,6 +534,215 @@ class ResultPanel(QWidget):
             <div style="margin-top: 16px; padding: 10px 14px; background-color: {WARNING_BG};
                         border-radius: 6px; font-size: 12px; color: {WARNING};">
                 AI 建议仅供参考，请结合实际情况和专业判断做出维修决策。
+            </div>
+        </div>
+        """
+
+    def refresh_theme(self):
+        """刷新主题样式 — 使用 theme_helper 获取颜色"""
+        from src.ui.theme_helper import get_theme_colors, get_symptom_colors
+        c = get_theme_colors()
+        sc = get_symptom_colors()
+
+        # 分隔条
+        self._splitter.setStyleSheet(f"""
+            QSplitter::handle {{
+                background-color: {c['CARD_BORDER']};
+                width: 1px;
+            }}
+        """)
+
+        # 知识库浏览器
+        self.knowledge_browser.setStyleSheet(f"""
+            QTextBrowser {{
+                background-color: transparent;
+                border: none;
+                padding: 4px;
+                font-size: 14px;
+                line-height: 1.7;
+                color: {c['TEXT_PRIMARY']};
+            }}
+        """)
+
+        # AI 头部
+        self._ai_header.setStyleSheet(f"""
+            QFrame {{
+                background-color: {c['PRIMARY_BG']};
+                border-radius: 8px; padding: 10px;
+            }}
+        """)
+        self._ai_title.setStyleSheet(f"font-size: 14px; font-weight: bold; color: {c['PRIMARY']};")
+
+        # AI 浏览器
+        self.ai_browser.setStyleSheet(f"""
+            QTextBrowser {{
+                background-color: transparent;
+                border: none;
+                padding: 4px;
+                font-size: 14px;
+                line-height: 1.7;
+                color: {c['TEXT_PRIMARY']};
+            }}
+        """)
+
+        # AI 状态标签
+        self.ai_status_label.setStyleSheet(f"font-size: 11px; color: {c['TEXT_SECONDARY']};")
+
+        # 导出按钮
+        self.export_btn.setStyleSheet(f"""
+            QPushButton {{
+                font-size: 12px;
+                background-color: {c['PRIMARY_BG']}; color: {c['PRIMARY']};
+                border: 1px solid {c['PRIMARY']}; border-radius: 4px;
+                padding: 2px 12px; min-height: 24px;
+            }}
+            QPushButton:hover {{ background-color: {c['PRIMARY']}; color: white; }}
+        """)
+
+        # ── 现象录入区 ──
+        self._symptom_card.setStyleSheet(f"""
+            QFrame#card {{
+                background-color: {sc['symptom_bg']};
+                border: 1px solid {sc['symptom_border']};
+                border-radius: 8px;
+            }}
+        """)
+        self._symptom_title.setStyleSheet(f"font-size: 13px; font-weight: bold; color: {sc['symptom_title_color']};")
+        self.symptom_display.setStyleSheet(f"""
+            font-size: 12px; color: {sc['symptom_text_color']}; padding: 8px;
+            background-color: {sc['symptom_display_bg']};
+            border-radius: 4px;
+        """)
+        self.symptom_input.setStyleSheet(f"""
+            QLineEdit {{
+                font-size: 13px; padding: 6px 10px;
+                border: 1px solid {sc['symptom_border']}; border-radius: 6px;
+                background-color: {c['INPUT_BG']}; min-height: 20px; color: {c['TEXT_PRIMARY']};
+            }}
+            QLineEdit:focus {{ border-color: {c['INPUT_FOCUS']}; }}
+        """)
+        self.symptom_btn.setStyleSheet(f"""
+            QPushButton {{
+                font-size: 13px; font-weight: bold;
+                background-color: {sc['symptom_title_color']}; color: white;
+                border: none; border-radius: 6px;
+                padding: 4px 20px; min-height: 32px;
+            }}
+            QPushButton:hover {{ background-color: {c['PRIMARY']}; }}
+            QPushButton:disabled {{ background-color: #C5E1A5; }}
+        """)
+
+        # 如果有当前结果，重新渲染
+        if self._current_result:
+            self.show_lookup_result(self._current_result)
+
+    def show_multi_code_result(self, result):
+        """
+        显示多故障码诊断结果
+
+        Args:
+            result: MultiCodeDiagnosticResult 对象
+        """
+        self.clear()
+        self._current_result = result
+
+        # 构建知识库区域：显示各故障码信息
+        kb_html = self._build_multi_code_kb_html(result)
+        self.knowledge_browser.setHtml(kb_html)
+
+        # 构建 AI 区域：显示综合分析
+        if result.has_ai():
+            ai_html = self._build_multi_code_ai_html(result)
+            self.ai_browser.setHtml(ai_html)
+            self.ai_status_label.setText(f"✅ {len(result.codes)} 个故障码综合分析已生成（仅供参考）")
+            self.ai_status_label.setStyleSheet("font-size: 12px; color: #4CAF50; padding: 4px;")
+        else:
+            self._show_ai_unavailable()
+
+    def _build_multi_code_kb_html(self, result) -> str:
+        """构建多故障码知识库 HTML"""
+        from src.ui.styles import get_token
+        TEXT_PRIMARY = get_token("TEXT_PRIMARY")
+        TEXT_SECONDARY = get_token("TEXT_SECONDARY")
+        CARD_BORDER = get_token("CARD_BORDER")
+        PRIMARY = get_token("PRIMARY")
+
+        html = f"""
+        <div style="font-family: 'Microsoft YaHei UI', sans-serif; color: {TEXT_PRIMARY};">
+            <div style="font-size: 16px; font-weight: bold; color: {PRIMARY}; margin-bottom: 12px;">
+                多故障码分析 — {len(result.codes)} 个故障码
+            </div>
+            <div style="color: {TEXT_SECONDARY}; font-size: 12px; margin-bottom: 16px;">
+                故障码: {', '.join(result.codes)}
+            </div>
+        """
+
+        for i, r in enumerate(result.codes, 1):
+            kb = result.results[i-1].knowledge if i-1 < len(result.results) else None
+            if kb:
+                severity = kb.get('severity', 'medium')
+                severity_map = {'low': '低', 'medium': '中', 'high': '高', 'critical': '严重'}
+                severity_label = severity_map.get(severity, severity)
+                severity_color = {'low': '#4CAF50', 'medium': '#FF9800', 'high': '#F44336', 'critical': '#9C27B0'}.get(severity, '#FF9800')
+
+                html += f"""
+                <div style="border: 1px solid {CARD_BORDER}; border-radius: 8px; padding: 12px; margin-bottom: 12px;">
+                    <div style="font-size: 14px; font-weight: bold; color: {PRIMARY}; margin-bottom: 8px;">
+                        {i}. {r}
+                        <span style="font-size: 12px; color: {severity_color}; margin-left: 8px;">{severity_label}</span>
+                    </div>
+                    <div style="color: {TEXT_PRIMARY}; margin-bottom: 4px;">
+                        <strong>描述:</strong> {kb.get('description', '未知')}
+                    </div>
+                    <div style="color: {TEXT_SECONDARY}; font-size: 12px;">
+                        <strong>系统:</strong> {kb.get('system', '未知')}
+                    </div>
+                """
+                detail = kb.get('detail', '')
+                if detail:
+                    html += f"""
+                    <div style="color: {TEXT_SECONDARY}; font-size: 12px; margin-top: 4px;">
+                        {detail}
+                    </div>
+                    """
+                html += "</div>"
+            else:
+                html += f"""
+                <div style="border: 1px solid {CARD_BORDER}; border-radius: 8px; padding: 12px; margin-bottom: 12px;">
+                    <div style="font-size: 14px; font-weight: bold; color: {TEXT_PRIMARY};">
+                        {i}. {r}
+                    </div>
+                    <div style="color: {TEXT_SECONDARY}; font-size: 12px;">
+                        知识库中未收录此故障码
+                    </div>
+                </div>
+                """
+
+        html += "</div>"
+        return html
+
+    def _build_multi_code_ai_html(self, result) -> str:
+        """构建多故障码 AI 综合分析 HTML"""
+        from src.ui.styles import get_token
+        TEXT_PRIMARY = get_token("TEXT_PRIMARY")
+        TEXT_SECONDARY = get_token("TEXT_SECONDARY")
+        WARNING_BG = get_token("WARNING_BG")
+        WARNING = get_token("WARNING")
+
+        rendered = md_to_html(result.ai_suggestion)
+
+        return f"""
+        <div style="font-family: 'Microsoft YaHei UI', sans-serif;">
+            <div style="color: {TEXT_SECONDARY}; font-size: 12px; margin-bottom: 12px;">
+                基于 {len(result.codes)} 个故障码的综合分析
+                <span style="float: right;">{result.timestamp}</span>
+            </div>
+            <div style="color: {TEXT_PRIMARY}; line-height: 1.7; font-size: 14px;">
+                {rendered}
+            </div>
+            <div style="margin-top: 16px; padding: 10px 14px; background-color: {WARNING_BG};
+                        border-radius: 6px; font-size: 12px; color: {WARNING};">
+                AI 综合分析仅供参考，请结合实际情况和专业判断做出维修决策。
             </div>
         </div>
         """

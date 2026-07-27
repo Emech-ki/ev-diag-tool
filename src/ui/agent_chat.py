@@ -77,6 +77,7 @@ class AgentChatPanel(QWidget):
         layout.setSpacing(8)
 
         info_card = QFrame()
+        self._info_card = info_card
         info_card.setStyleSheet(f"background-color: {PRIMARY_BG}; border-radius: 8px;")
         info_card_layout = QHBoxLayout(info_card)
         info_card_layout.setContentsMargins(14, 10, 14, 10)
@@ -85,6 +86,7 @@ class AgentChatPanel(QWidget):
             "AI 诊断助手会通过提问引导你一步步排查故障。\n"
             "输入故障码开始对话，或直接描述你遇到的问题。"
         )
+        self._info_label = info_label
         info_label.setStyleSheet(f"color: {PRIMARY}; font-size: 12px;")
         info_label.setWordWrap(True)
         info_card_layout.addWidget(info_label)
@@ -107,6 +109,7 @@ class AgentChatPanel(QWidget):
         self._append_welcome()
 
         input_card = QFrame()
+        self._input_card = input_card
         input_card.setStyleSheet(f"""
             QFrame {{
                 background-color: {CARD_BG};
@@ -205,6 +208,13 @@ class AgentChatPanel(QWidget):
         self.chat_edit.setUpdatesEnabled(True)
 
     def _append_welcome(self):
+        from src.ui.styles import get_token
+        TEXT_PRIMARY = get_token("TEXT_PRIMARY")
+        PRIMARY = get_token("PRIMARY")
+        TEXT_SECONDARY = get_token("TEXT_SECONDARY")
+        BG = get_token("BG")
+        CARD_BORDER = get_token("CARD_BORDER")
+
         welcome = f"""
         <div style="font-family: 'Microsoft YaHei UI', sans-serif; color: {TEXT_PRIMARY};">
             <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
@@ -231,6 +241,14 @@ class AgentChatPanel(QWidget):
 
     def _append_message_html(self, role: str, content: str):
         """仅渲染消息到界面（不记录）"""
+        from src.ui.styles import get_token
+        PRIMARY_BG = get_token("PRIMARY_BG")
+        PRIMARY = get_token("PRIMARY")
+        TEXT_PRIMARY = get_token("TEXT_PRIMARY")
+        CARD_BG = get_token("CARD_BG")
+        WARNING_BG = get_token("WARNING_BG")
+        WARNING = get_token("WARNING")
+
         if role == "assistant":
             # AI 回复使用完整 Markdown 渲染
             rendered = md_to_html(content)
@@ -252,7 +270,7 @@ class AgentChatPanel(QWidget):
         elif role == "assistant":
             html = f"""
             <div style="margin: 8px 0;">
-                <div style="display: inline-block; background-color: #F5F5F5;
+                <div style="display: inline-block; background-color: {CARD_BG};
                             color: {TEXT_PRIMARY}; padding: 10px 16px; border-radius: 14px 14px 14px 4px;
                             max-width: 70%; text-align: left; font-size: 14px; line-height: 1.6;">
                     {rendered}
@@ -454,3 +472,71 @@ class AgentChatPanel(QWidget):
         self.agent.reset_session()
         self._clear_display()
         self._append_welcome()
+
+    def refresh_theme(self):
+        """刷新主题样式 — 使用 theme_helper 获取颜色"""
+        from src.ui.theme_helper import get_theme_colors
+        c = get_theme_colors()
+
+        # 信息卡片
+        self._info_card.setStyleSheet(f"background-color: {c['PRIMARY_BG']}; border-radius: 8px;")
+        self._info_label.setStyleSheet(f"color: {c['PRIMARY']}; font-size: 12px;")
+
+        # 聊天区域
+        self.chat_edit.setStyleSheet(f"""
+            QTextEdit {{
+                background-color: transparent;
+                border: none;
+                padding: 8px;
+                font-size: 14px;
+                line-height: 1.6;
+                color: {c['TEXT_PRIMARY']};
+            }}
+        """)
+
+        # 输入卡片
+        self._input_card.setStyleSheet(f"""
+            QFrame {{
+                background-color: {c['CARD_BG']};
+                border: 1px solid {c['CARD_BORDER']};
+                border-radius: 10px;
+            }}
+        """)
+
+        # 输入框
+        self.message_input.setStyleSheet(f"""
+            QLineEdit {{
+                font-size: 14px; padding: 6px 10px;
+                border: 1px solid {c['INPUT_BORDER']}; border-radius: 6px;
+                background-color: {c['INPUT_BG']}; min-height: 24px; color: {c['TEXT_PRIMARY']};
+            }}
+            QLineEdit:focus {{ border-color: {c['INPUT_FOCUS']}; background-color: {c['CARD_BG']}; }}
+        """)
+
+        # 发送按钮
+        self.send_btn.setStyleSheet(f"""
+            QPushButton {{
+                font-size: 14px; font-weight: bold;
+                background-color: {c['PRIMARY']}; color: white;
+                border: none; border-radius: 8px;
+                padding: 4px 20px; min-height: 36px;
+            }}
+            QPushButton:hover {{ background-color: {c['PRIMARY_DARK']}; }}
+            QPushButton:disabled {{ background-color: #90CAF9; }}
+        """)
+
+        # 快捷按钮
+        btn_style = f"""
+            QPushButton {{
+                font-size: 12px;
+                background-color: {c['CARD_BG']};
+                color: {c['TEXT_SECONDARY']};
+                border: 1px solid {c['CARD_BORDER']};
+                border-radius: 6px;
+                padding: 4px 14px;
+            }}
+            QPushButton:hover {{ background-color: {c['PRIMARY_BG']}; color: {c['PRIMARY']}; }}
+        """
+        self.btn_start.setStyleSheet(btn_style)
+        self.btn_history.setStyleSheet(btn_style)
+        self.btn_clear.setStyleSheet(btn_style)

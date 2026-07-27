@@ -21,7 +21,7 @@ Python 3.10+ / PyQt6 / aiosqlite / Ollama (本地 LLM) / OpenAI 兼容 API
 ```bash
 python scripts/seed_db.py    # 初始化数据库（含新能源码+车型数据）
 python src/main.py           # 运行程序
-pytest tests/                # 运行测试（76个测试）
+pytest tests/                # 运行测试（143个测试）
 ```
 
 ## 代码规范

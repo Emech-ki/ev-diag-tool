@@ -299,3 +299,80 @@ class PromptTemplates:
 
         role = expert_roles.get(expert, "")
         return base_prompt + role
+
+    def build_multi_code_diagnostic_prompt(
+        self,
+        codes: List[str],
+        knowledge_list: List[Dict[str, Any]],
+        vehicle_info: str = "",
+        additional_info: str = ""
+    ) -> str:
+        """
+        构建多故障码综合分析提示词
+
+        Args:
+            codes: 故障码列表
+            knowledge_list: 每个码的知识库信息
+            vehicle_info: 车型信息
+            additional_info: 附加描述
+
+        Returns:
+            格式化的提示词字符串
+        """
+        prompt = """你是一位经验丰富的新能源汽车维修诊断专家。
+技师同时读取到多个故障码，请进行综合分析，找出可能的关联性和根本原因。
+
+## 故障码列表
+"""
+        for i, code in enumerate(codes, 1):
+            prompt += f"{i}. {code}\n"
+
+        prompt += "\n## 各故障码知识库信息\n"
+        for info in knowledge_list:
+            code = info.get("code", "")
+            desc = info.get("description", "未知")
+            severity = info.get("severity", "未知")
+            system = info.get("system", "未知")
+            prompt += f"- **{code}**: {desc} (系统: {system}, 严重程度: {severity})\n"
+
+        if vehicle_info:
+            prompt += f"\n## 车型信息\n{vehicle_info}\n"
+
+        if additional_info:
+            prompt += f"\n## 技师描述\n{additional_info}\n"
+
+        prompt += """
+## 分析要求
+
+请按以下结构输出分析结果：
+
+### 1. 各故障码简要分析
+对每个故障码进行简要说明，包括：
+- 故障含义
+- 可能原因
+
+### 2. 关联性分析
+分析这些故障码之间可能的关联：
+- 是否可能由同一个根本原因导致
+- 哪些码可能是因果关系
+- 哪些码可能是独立问题
+
+### 3. 根本原因推断
+基于关联性分析，推断最可能的根本原因（1-3个），按可能性排序。
+
+### 4. 维修方案
+给出完整的维修方案：
+- **优先级排序**：应该先检查什么，后检查什么
+- **具体步骤**：每一步的操作和判断标准
+- **注意事项**：安全提醒和常见陷阱
+
+### 5. 安全提醒
+如果涉及高压系统或安全风险，必须在开头强调。
+
+## 输出要求
+- **必须使用中文回复**
+- 分析要基于知识库数据，不要编造
+- 如果某个码不在知识库中，明确说明
+- 给出可操作的具体步骤，不要泛泛而谈
+"""
+        return prompt
