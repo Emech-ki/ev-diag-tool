@@ -134,6 +134,35 @@ class DatabaseManager:
         finally:
             conn.close()
 
+    def query_by_codes(self, codes: List[str]) -> Dict[str, Dict[str, Any]]:
+        """
+        批量查询多个故障码
+
+        Args:
+            codes: 故障码列表，如 ["P0300", "P0171", "P0420"]
+
+        Returns:
+            字典，键为故障码（大写），值为查询结果
+            未找到的码不包含在结果中
+        """
+        if not codes:
+            return {}
+
+        conn = self.get_connection()
+        try:
+            cursor = conn.cursor()
+            # 使用 IN 语句批量查询
+            placeholders = ",".join("?" * len(codes))
+            codes_upper = [code.upper() for code in codes]
+            cursor.execute(
+                f"SELECT * FROM obd_codes WHERE code IN ({placeholders})",
+                codes_upper
+            )
+            rows = cursor.fetchall()
+            return {row["code"]: dict(row) for row in rows}
+        finally:
+            conn.close()
+
     def search_codes(self, keyword: str, limit: int = 20) -> List[Dict[str, Any]]:
         """
         搜索故障码（模糊匹配）

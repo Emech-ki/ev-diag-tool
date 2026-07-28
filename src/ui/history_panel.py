@@ -38,6 +38,7 @@ class HistoryPanel(QWidget):
 
         # ── Header Card ──
         header_card = QFrame()
+        self._header_card = header_card
         header_card.setStyleSheet(f"""
             QFrame {{
                 background-color: {CARD_BG};
@@ -50,6 +51,7 @@ class HistoryPanel(QWidget):
         header_layout.setSpacing(10)
 
         title = QLabel("诊断历史")
+        self._title = title
         title.setStyleSheet(f"font-size: 15px; font-weight: bold; color: {TEXT_PRIMARY};")
         header_layout.addWidget(title)
 
@@ -200,3 +202,72 @@ class HistoryPanel(QWidget):
 
         if action == export_action:
             self.export_requested.emit(record)
+
+    def refresh_theme(self):
+        """刷新主题样式 — 使用 theme_helper 获取颜色"""
+        from src.ui.theme_helper import get_theme_colors
+        c = get_theme_colors()
+
+        # 头部卡片
+        self._header_card.setStyleSheet(f"""
+            QFrame {{
+                background-color: {c['CARD_BG']};
+                border: 1px solid {c['CARD_BORDER']};
+                border-radius: 10px;
+            }}
+        """)
+        self._title.setStyleSheet(f"font-size: 15px; font-weight: bold; color: {c['TEXT_PRIMARY']};")
+
+        # 搜索框
+        self.search_input.setStyleSheet(f"""
+            QLineEdit {{
+                font-size: 13px; padding: 6px 12px;
+                border: 1px solid {c['INPUT_BORDER']}; border-radius: 8px;
+                background: {c['INPUT_BG']}; min-height: 22px; max-width: 240px;
+                color: {c['TEXT_PRIMARY']};
+            }}
+            QLineEdit:focus {{ border-color: {c['INPUT_FOCUS']}; }}
+        """)
+
+        # 清空按钮
+        self.clear_btn.setStyleSheet(f"""
+            QPushButton {{
+                font-size: 12px; padding: 6px 14px;
+                background-color: {c['WARNING_BG']}; color: {c['WARNING']};
+                border: 1px solid {c['WARNING']}; border-radius: 6px;
+            }}
+            QPushButton:hover {{ background-color: {c['WARNING']}; color: white; }}
+        """)
+
+        # 表格样式
+        self.table.setStyleSheet(f"""
+            QTableWidget {{
+                background-color: {c['CARD_BG']};
+                border: 1px solid {c['CARD_BORDER']};
+                border-radius: 8px;
+                gridline-color: {c['CARD_BORDER']};
+                font-size: 13px;
+            }}
+            QTableWidget::item {{
+                padding: 8px 12px;
+                color: {c['TEXT_PRIMARY']};
+            }}
+            QTableWidget::item:selected {{
+                background-color: {c['PRIMARY_BG']};
+            }}
+            QTableWidget::item:alternate {{
+                background-color: {c['BG']};
+            }}
+            QHeaderView::section {{
+                background-color: {c['CARD_BG']};
+                border: none;
+                border-bottom: 1px solid {c['CARD_BORDER']};
+                padding: 8px 12px;
+                font-size: 12px;
+                font-weight: bold;
+                color: {c['TEXT_SECONDARY']};
+            }}
+        """)
+
+        # 统计标签
+        self.stats_label.setStyleSheet(f"font-size: 12px; color: {c['TEXT_MUTED']}; padding: 4px 8px;")

@@ -3,6 +3,7 @@
 协调知识库查询和 AI 建议，生成完整的诊断结果
 """
 
+import re
 from typing import Optional, Dict, Any, List
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -30,6 +31,56 @@ class DiagnosticResult:
         return self.ai_suggestion is not None and self.ai_available
 
 
+@dataclass
+class MultiCodeDiagnosticResult:
+    """多故障码诊断结果数据类"""
+    codes: List[str]                              # 故障码列表
+    results: List[DiagnosticResult]               # 每个码的诊断结果
+    ai_suggestion: Optional[str]                  # AI 综合分析建议
+    ai_available: bool                            # AI 是否可用
+    timestamp: str = field(default_factory=lambda: datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+
+    def has_knowledge(self) -> bool:
+        """是否有知识库结果"""
+        return any(r.has_knowledge() for r in self.results)
+
+    def has_ai(self) -> bool:
+        """是否有 AI 建议"""
+        return self.ai_suggestion is not None and self.ai_available
+
+
+def parse_fault_codes(input_text: str) -> List[str]:
+    """
+    从输入文本中解析故障码
+
+    支持的格式:
+    - 逗号分隔: P0300, P0171, P0420
+    - 空格分隔: P0300 P0171 P0420
+    - 混合分隔: P0300, P0171 P0420
+    - 换行分隔: P0300\nP0171\nP0420
+
+    Returns:
+        故障码列表（已转大写、去重、保持顺序）
+    """
+    if not input_text:
+        return []
+
+    # 使用正则表达式匹配故障码格式: 字母(P/B/C/U) + 数字
+    pattern = r'[PpBbCcUu]\d{4}'
+    matches = re.findall(pattern, input_text)
+
+    # 转大写、去重、保持顺序
+    seen = set()
+    codes = []
+    for code in matches:
+        code_upper = code.upper()
+        if code_upper not in seen:
+            seen.add(code_upper)
+            codes.append(code_upper)
+
+    return codes
+
+
 class DiagnosticEngine:
     """
     诊断引擎
@@ -43,7 +94,7 @@ class DiagnosticEngine:
 
     def diagnose(self, code: str, vehicle_info: str = "", additional_info: str = "") -> DiagnosticResult:
         """
-        执行诊断
+        执行单故障码诊断
 
         Args:
             code: 故障码
@@ -77,6 +128,66 @@ class DiagnosticEngine:
         return DiagnosticResult(
             code=code,
             knowledge=knowledge,
+            ai_suggestion=ai_suggestion,
+            ai_available=ai_available
+        )
+
+    def diagnose_multiple(self, codes: List[str], vehicle_info: str = "", additional_info: str = "") -> MultiCodeDiagnosticResult:
+        """
+        执行多故障码诊断
+
+        Args:
+            codes: 故障码列表
+            vehicle_info: 车型信息（可选）
+            additional_info: 附加描述信息（可选）
+
+        Returns:
+            MultiCodeDiagnosticResult 对象
+        """
+        # 1. 批量查询知识库
+        knowledge_map = self.kb.lookup_multiple(codes)
+
+        # 2. 构建结果列表
+        results = []
+        for code in codes:
+            knowledge = knowledge_map.get(code.upper())
+            results.append(DiagnosticResult(
+                code=code,
+                knowledge=knowledge,
+                ai_suggestion=None,
+                ai_available=self.llm.is_available()
+            ))
+
+        # 3. 获取 AI 综合分析
+        ai_suggestion = None
+        ai_available = self.llm.is_available()
+
+        if ai_available:
+            try:
+                # 收集所有码的知识库信息
+                knowledge_list = []
+                for r in results:
+                    if r.knowledge:
+                        knowledge_list.append({
+                            "code": r.code,
+                            "description": r.knowledge.get("description", ""),
+                            "severity": r.knowledge.get("severity", ""),
+                            "system": r.knowledge.get("system", "")
+                        })
+
+                ai_suggestion = self.llm.get_multi_code_analysis(
+                    codes=codes,
+                    knowledge_list=knowledge_list,
+                    vehicle_info=vehicle_info,
+                    additional_info=additional_info
+                )
+            except Exception as e:
+                ai_suggestion = f"⚠️ AI 综合分析服务暂时不可用: {str(e)}"
+                ai_available = False
+
+        return MultiCodeDiagnosticResult(
+            codes=codes,
+            results=results,
             ai_suggestion=ai_suggestion,
             ai_available=ai_available
         )

@@ -371,69 +371,62 @@ def main():
         conn.close()
         return
 
-    # 逐条处理（比批量更可靠，AI 不会丢码）
+    # 并发处理（5 个同时请求，大幅提速）
+    from concurrent.futures import ThreadPoolExecutor, as_completed
     total = len(codes)
     success_count = 0
     error_count = 0
+    CONCURRENCY = 5
 
-    print(f"\n开始处理，共 {total} 条")
+    print(f"\n开始处理，共 {total} 条，并发数 {CONCURRENCY}")
     print("-" * 60)
 
-    for i, code_info in enumerate(codes):
+    def process_one(code_info):
+        """处理单个故障码"""
         code = code_info["code"]
-        print(f"\n[{i+1}/{total}] {code}: {code_info['description'][:40]}")
-
-        # 构建 prompt
         user_msg = build_prompt(code_info)
         messages = [
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": user_msg},
         ]
-
-        # 调用 AI
         try:
             t0 = time.time()
             response = call_llm(config, messages, temperature=0.3, max_tokens=2048)
             elapsed = time.time() - t0
-            print(f"  AI 响应: {elapsed:.1f}s", end="")
-
-            # 解析响应
             results = parse_ai_response(response)
             data = results[0] if results else None
-
             if data:
-                issues = validate_enhancement(data)
-                if issues:
-                    print(f" [WARN: {', '.join(issues)}]", end="")
                 update_code(code, data)
-                progress.setdefault("completed", []).append(code)
-                success_count += 1
-                print(f" -> OK")
+                return (code, True, elapsed, None)
             else:
-                print(f" -> [FAIL] 无法解析响应")
-                progress.setdefault("failed", []).append(code)
-                error_count += 1
-
-            # 每 10 条提交一次
-            if (i + 1) % 10 == 0:
-                conn.commit()
-                save_progress(progress)
-
-        except urllib.error.HTTPError as e:
-            print(f"  [ERROR] HTTP {e.code}: {e.reason}")
-            progress.setdefault("failed", []).append(code)
-            error_count += 1
-            if e.code == 429:
-                print("  请求过于频繁，等待 30 秒后重试...")
-                time.sleep(30)
+                return (code, False, elapsed, "无法解析响应")
         except Exception as e:
-            print(f"  [ERROR] {type(e).__name__}: {e}")
-            progress.setdefault("failed", []).append(code)
-            error_count += 1
+            return (code, False, 0, str(e))
 
-        # 请求间隔（避免过载）
-        if i < total - 1:
-            time.sleep(0.5)
+    # 分批并发
+    for batch_start in range(0, total, CONCURRENCY):
+        batch_end = min(batch_start + CONCURRENCY, total)
+        batch = codes[batch_start:batch_end]
+
+        with ThreadPoolExecutor(max_workers=CONCURRENCY) as executor:
+            futures = {executor.submit(process_one, c): c for c in batch}
+            for future in as_completed(futures):
+                code, ok, elapsed, err = future.result()
+                if ok:
+                    success_count += 1
+                    progress.setdefault("completed", []).append(code)
+                    print(f"  [OK] {code} ({elapsed:.1f}s)")
+                else:
+                    error_count += 1
+                    progress.setdefault("failed", []).append(code)
+                    print(f"  [FAIL] {code}: {err}")
+
+        # 每批保存进度
+        save_progress(progress)
+        done = batch_end
+        remaining = total - done
+        eta_hours = remaining * 20 / CONCURRENCY / 3600
+        print(f"  进度: {done}/{total} ({done*100/total:.1f}%) | 预计剩余: {eta_hours:.1f}h")
 
     # 关闭读取连接
     save_progress(progress)

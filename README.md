@@ -6,11 +6,19 @@
 
 ---
 
-## 📋 项目记忆 | Project Memory
+## 📋 项目状态
 
-> 本文档记录了项目的所有重要决策和设计思路，相当于项目的"长期记忆"。
+| 指标 | 数值 |
+|------|------|
+| **版本** | v3.4.0 |
+| **测试** | 143 个全部通过 |
+| **故障码** | 8729 条（100% 中文） |
+| **详细信息覆盖** | 98.2%（8575 条） |
+| **车型数据** | 45 款 / 18 品牌 |
 
-### 🎯 项目定位
+---
+
+## 🎯 项目定位
 
 | 项目维度 | 决策内容 |
 |---------|---------|
@@ -158,6 +166,7 @@ pyinstaller --onefile --windowed --icon=docs/icon.ico src/main.py
 ```
 ev-diag-tool/
 ├── README.md                 # 项目文档（就是本文件）
+├── CLAUDE.md                 # Claude Code 项目规范
 ├── requirements.txt          # Python 依赖清单
 ├── .env.example             # 环境变量模板
 │
@@ -166,15 +175,24 @@ ev-diag-tool/
 │   │   ├── p_codes.csv       # P系列故障码（动力总成）
 │   │   ├── b_codes.csv       # B系列故障码（车身）
 │   │   ├── c_codes.csv       # C系列故障码（底盘）
-│   │   └── u_codes.csv       # U系列故障码（网络通讯）
+│   │   ├── u_codes.csv       # U系列故障码（网络通讯）
+│   │   └── ev_codes.csv      # 新能源专用故障码
 │   └── obd_codes.db          # SQLite数据库（运行时生成）
 │
 ├── src/                      # 源代码
 │   ├── main.py               # 程序入口
+│   ├── config.py             # 配置管理
+│   ├── version.py            # 版本信息
 │   ├── ui/                   # 界面层
 │   │   ├── main_window.py    # 主窗口
 │   │   ├── result_panel.py   # 结果展示面板
-│   │   └── agent_chat.py     # AI Agent对话面板
+│   │   ├── agent_chat.py     # AI Agent对话面板
+│   │   ├── history_panel.py  # 诊断历史面板
+│   │   ├── export_utils.py   # 诊断结果导出
+│   │   ├── markdown_renderer.py # Markdown渲染器
+│   │   ├── theme_helper.py   # 主题辅助模块
+│   │   ├── styles/           # 设计令牌（深色/浅色主题）
+│   │   └── add_endpoint_dialog.py # 添加端点对话框
 │   ├── database/             # 数据库层
 │   │   ├── db_manager.py     # 数据库管理
 │   │   └── schema.py         # 表结构定义
@@ -184,18 +202,22 @@ ev-diag-tool/
 │   └── ai/                   # AI服务层
 │       ├── llm_client.py     # LLM API客户端
 │       ├── prompt_templates.py # 提示词模板
-│       └── agent.py          # AI Agent实现
+│       ├── agent.py          # AI Agent实现
+│       ├── tools.py          # 工具调用框架
+│       ├── diagnostic_tools.py # 诊断工具集
+│       └── providers/        # LLM Provider抽象层
 │
 ├── scripts/                  # 工具脚本
 │   ├── seed_db.py            # 数据库初始化
-│   └── build_exe.py          # 打包脚本
+│   ├── batch_enhance_codes.py # 批量增强脚本
+│   └── ...
 │
-├── tests/                    # 单元测试
-│   ├── test_database.py
-│   ├── test_engine.py
-│   └── test_ai.py
-│
-└── docs/                     # 文档资源
+└── tests/                    # 单元测试（143个）
+    ├── test_database.py
+    ├── test_engine.py
+    ├── test_ai.py
+    ├── test_providers.py
+    └── test_export_and_markdown.py
 ```
 
 ---
@@ -215,14 +237,44 @@ ev-diag-tool/
 
 ### 当前覆盖的故障码范围
 
-| 类别 | 数量 | 示例 |
+| 类别 | 数量 | 说明 |
 |-----|------|------|
-| P0xxx 发动机 | 30个 | P0300缺火, P0420催化器 |
-| P1xxx 厂商自定义 | 5个 | P1A00电池组故障 |
-| B0xxx 车身电器 | 5个 | B1420安全气囊 |
-| C0xxx 底盘 | 5个 | C0035轮速传感器 |
-| U0xxx 网络通讯 | 5个 | U0100通讯丢失 |
-| **合计** | **50个** | 核心常用码 |
+| P-codes (动力总成) | 6553 | 标准英文 + 中文详细 |
+| U-codes (网络通讯) | 1231 | 标准英文 + 中文详细 |
+| C-codes (底盘) | 525 | 标准英文 + 中文详细 |
+| B-codes (车身) | 360 | 标准英文 + 中文详细 |
+| EV-codes (新能源) | 60 | 中文详细 |
+| **合计** | **8729** | 98.2% 有详细诊断信息 |
+
+---
+
+## 🚀 功能特性
+
+### 已实现功能
+
+| 功能 | 说明 |
+|------|------|
+| **故障码查询** | 支持 P/B/C/U 系列 8729 条故障码 |
+| **AI 诊断建议** | 支持 Ollama 本地模型 + OpenAI 兼容 API |
+| **AI Agent 对话** | 流式 Tool Calling，对话式排查引导 |
+| **多 Agent 协作** | 专家路由系统（BMS/电机/热管理/通用） |
+| **多故障码分析** | 自动识别多个故障码，综合分析因果关系 |
+| **深色模式** | 主题切换，持久化到 .env |
+| **诊断结果导出** | 支持 txt/html 格式 |
+| **诊断历史** | 记录历史诊断，支持搜索和导出 |
+| **批量数据增强** | AI 批量生成故障码详细诊断信息 |
+
+### AI 方案说明
+
+**方案B — LLM 增强诊断：**
+- 输入故障码 + 车型 + 附加描述
+- LLM 生成结构化的诊断建议
+- 界面清晰标注"AI建议，仅供参考"
+
+**方案C — AI Agent 交互诊断：**
+- 基于 Tool Calling 让 Agent 访问数据库
+- 多 Agent 协作（BMS/电机/热管理专家）
+- 维护诊断会话上下文，主动提问引导排查
 
 ---
 

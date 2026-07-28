@@ -17,6 +17,38 @@ class KnowledgeBase:
     def __init__(self, db: Optional[DatabaseManager] = None):
         self.db = db or get_db()
 
+    def _parse_knowledge_row(self, row: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        解析知识库行数据（统一处理 JSON 字段）
+
+        Args:
+            row: 数据库查询结果字典
+
+        Returns:
+            解析后的字典，JSON 字段已转换为 Python 对象
+        """
+        # 解析 JSON 字段
+        row["common_causes"] = self.db.parse_json_field(row.get("common_causes", "[]"))
+        row["diagnostic_steps"] = self.db.parse_json_field(row.get("diagnostic_steps", "[]"))
+
+        # 解析相关故障码（兼容 JSON 数组和逗号分隔两种格式）
+        related = row.get("related_codes", "")
+        if isinstance(related, str) and related:
+            try:
+                parsed = json.loads(related)
+                if isinstance(parsed, list):
+                    row["related_codes"] = [str(c).strip() for c in parsed if str(c).strip()]
+                else:
+                    row["related_codes"] = [c.strip() for c in related.split(",") if c.strip()]
+            except (json.JSONDecodeError, TypeError):
+                row["related_codes"] = [c.strip() for c in related.split(",") if c.strip()]
+        elif isinstance(related, list):
+            row["related_codes"] = related
+        else:
+            row["related_codes"] = []
+
+        return row
+
     def lookup(self, code: str) -> Optional[Dict[str, Any]]:
         """
         查询故障码
@@ -43,25 +75,33 @@ class KnowledgeBase:
         if result is None:
             return None
 
-        # 解析 JSON 字段
-        result["common_causes"] = self.db.parse_json_field(result.get("common_causes", "[]"))
-        result["diagnostic_steps"] = self.db.parse_json_field(result.get("diagnostic_steps", "[]"))
+        return self._parse_knowledge_row(result)
 
-        # 解析相关故障码（兼容 JSON 数组和逗号分隔两种格式）
-        related = result.get("related_codes", "")
-        if isinstance(related, str) and related:
-            try:
-                parsed = json.loads(related)
-                if isinstance(parsed, list):
-                    result["related_codes"] = [str(c).strip() for c in parsed if str(c).strip()]
-                else:
-                    result["related_codes"] = [c.strip() for c in related.split(",") if c.strip()]
-            except (json.JSONDecodeError, TypeError):
-                result["related_codes"] = [c.strip() for c in related.split(",") if c.strip()]
-        elif isinstance(related, list):
-            result["related_codes"] = related
-        else:
-            result["related_codes"] = []
+    def lookup_multiple(self, codes: List[str]) -> Dict[str, Optional[Dict[str, Any]]]:
+        """
+        批量查询多个故障码
+
+        Args:
+            codes: 故障码列表，如 ["P0300", "P0171", "P0420"]
+
+        Returns:
+            字典，键为故障码（大写），值为知识库数据
+            未找到的码值为 None
+        """
+        if not codes:
+            return {}
+
+        # 批量查询数据库
+        raw_results = self.db.query_by_codes(codes)
+
+        # 处理每个结果
+        result = {}
+        for code in codes:
+            code_upper = code.upper()
+            if code_upper in raw_results:
+                result[code_upper] = self._parse_knowledge_row(raw_results[code_upper])
+            else:
+                result[code_upper] = None
 
         return result
 
