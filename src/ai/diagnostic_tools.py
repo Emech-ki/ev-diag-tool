@@ -563,13 +563,44 @@ def _search_codes_by_system(kb: KnowledgeBase, system: str) -> str:
         "EV-COMM": "新能源网络通讯",
     }
 
-    results = kb.search(system, limit=20)
+    # 系统代码到数据库system字段的映射
+    system_to_db = {
+        "P": "Powertrain",
+        "B": "Body",
+        "C": "Chassis",
+        "U": "Network",
+    }
 
-    # 过滤出属于该系统的码
-    filtered = [r for r in results if r.get("system", "").upper() == system
-                or r.get("code", "").upper().startswith(system)]
+    # 获取对应的数据库system名称
+    db_system = system_to_db.get(system, system)
 
-    if not filtered:
+    # 直接用 SQL 查询，按 code 前缀或 system 字段精确匹配
+    # 这样比 kb.search() 模糊搜索更可靠
+    try:
+        if system.startswith("EV-"):
+            # EV 系统码：按 code 前缀匹配（如 EV-BMS-001）
+            results = kb.db.execute_query(
+                "SELECT code, description, severity FROM obd_codes WHERE code LIKE ? LIMIT 15",
+                (f"{system}-%",)
+            )
+        else:
+            # 传统系统码：按 code 首字母匹配（如 P0300）
+            results = kb.db.execute_query(
+                "SELECT code, description, severity FROM obd_codes WHERE code LIKE ? LIMIT 15",
+                (f"{system[0]}%",)
+            )
+    except Exception:
+        # 降级到旧方式
+        results = kb.search(db_system, limit=50)
+        filtered = []
+        for r in results:
+            r_system = (r.get("system") or "").upper()
+            r_code = (r.get("code") or "").upper()
+            if r_system == db_system.upper() or r_system == system or r_code.startswith(system):
+                filtered.append(r)
+        results = filtered[:15]
+
+    if not results:
         return json.dumps({
             "found": False,
             "system": system,
@@ -578,7 +609,7 @@ def _search_codes_by_system(kb: KnowledgeBase, system: str) -> str:
         }, ensure_ascii=False)
 
     codes = []
-    for r in filtered[:15]:  # 最多返回 15 个
+    for r in results:
         codes.append({
             "code": r["code"],
             "description": r.get("description", ""),

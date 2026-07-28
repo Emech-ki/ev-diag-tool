@@ -1,15 +1,44 @@
 # Handoff Document — EV-Diag-Tool
 
-**Date:** 2026-07-26
+**Date:** 2026-07-28
 **Project:** `D:\桌面\诊断ai程序\ev-diag-tool`
 **Repo:** https://github.com/Emech-ki/ev-diag-tool.git
-**Version:** v3.1.0 — Streaming Tool Calling
-**Tests:** 85 passed (unit) + 42 passed (verification)
+**Version:** v3.4.0 — Multi-Fault Analysis + Bug Fixes
+**Tests:** 84 passed (unit)
 **Database:** 8729 fault codes (100% 中文) + 45 vehicle models
 
 ---
 
 ## 本次会话完成的工作
+
+### 1. 多故障码分析 Bug 修复（4 项）
+
+| # | 严重度 | Bug | 修复 | 文件 |
+|---|--------|-----|------|------|
+| 1 | 🟠 MEDIUM | `search_codes_by_system` 搜索不可靠 | 改用 SQL 直接查询 | `src/ai/diagnostic_tools.py` |
+| 2 | 🟠 MEDIUM | EV 系统码关联判断过宽 | 用 code 前缀判断子系统 | `src/engine/correlation.py` |
+| 3 | 🟡 LOW | 多码 AI 流式显示清空问题 | 重建完整内容显示 | `src/ui/result_panel.py` |
+| 4 | 🟡 LOW | 综合 AI 缺少专门方法 | 添加 `append_combined_ai_token` | `src/ui/result_panel.py`, `src/ui/main_window.py` |
+
+### 2. AI 配置问题修复（3 项）
+
+| # | 问题 | 修复 |
+|---|------|------|
+| 1 | AI 灯黄色/不亮 | `.env` 中 `AI_PROVIDER=openai` 改为 `ollama` |
+| 2 | 没有模型 | 下载了 `qwen2.5:7b`（4.7GB） |
+| 3 | 诊断提示不详细 | 添加了详细的错误诊断信息 |
+
+### 3. 文件变更
+
+**修改的文件：**
+- `src/ai/diagnostic_tools.py` — `_search_codes_by_system()` 改用 SQL 查询
+- `src/engine/correlation.py` — `_analyze_pair()` EV 码子系统判断
+- `src/ui/result_panel.py` — `append_individual_ai_token()` 修复流式显示
+- `src/ui/main_window.py` — 添加 `_on_combined_ai_token()` 回调
+- `.env` — `AI_PROVIDER=ollama`
+
+**新建的文件：**
+- `src/engine/correlation.py` — 故障码关联性分析模块
 
 ### 1. 数据库验证与分析（2026-07-26）
 

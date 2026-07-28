@@ -241,7 +241,7 @@ def test_tool_search_by_system():
 
 def test_tool_schema_all_valid():
     schemas = reg.to_openai_format()
-    assert len(schemas) == 9, f"期望 9 个工具，实际 {len(schemas)}"
+    assert len(schemas) == 10, f"期望 10 个工具，实际 {len(schemas)}"
     for s in schemas:
         assert s["type"] == "function"
         assert "name" in s["function"]
@@ -351,7 +351,7 @@ from src.ai.agent import DiagnosticAgent
 def test_agent_init():
     agent = DiagnosticAgent(kb=kb)
     assert agent.session_code is None
-    assert len(agent.tools) == 9
+    assert len(agent.tools) == 10
     return True
 
 def test_agent_start_diagnosis():
@@ -376,7 +376,7 @@ def test_agent_session_summary():
     agent.start_diagnosis("P0300")
     s = agent.get_session_summary()
     assert s["code"] == "P0300"
-    assert s["tools_available"] == 9
+    assert s["tools_available"] == 10
     return True
 
 def test_agent_build_messages():

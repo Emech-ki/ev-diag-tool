@@ -299,3 +299,96 @@ class PromptTemplates:
 
         role = expert_roles.get(expert, "")
         return base_prompt + role
+
+    def build_multi_diagnostic_prompt(
+        self,
+        codes: List[str],
+        results: List[Dict[str, Any]],
+        correlation_summary: str,
+        vehicle_info: str = "",
+        additional_info: str = "",
+    ) -> str:
+        """
+        构建多故障码综合诊断提示词
+        
+        与单码 prompt 的区别：
+        - 包含所有故障码信息
+        - 包含关联性分析结论
+        - 要求 LLM 从系统性角度分析共同根因
+        """
+        # 严重程度取最高的
+        max_severity = "low"
+        severity_order = {"low": 0, "medium": 1, "high": 2, "critical": 3}
+        for r in results:
+            sev = r.get("severity", "medium") if r else "medium"
+            if severity_order.get(sev, 1) > severity_order.get(max_severity, 0):
+                max_severity = sev
+
+        sev_label, sev_icon = self.SEVERITY_LABELS.get(max_severity, ("中等", "⚠️"))
+        is_critical = max_severity in ("high", "critical")
+
+        # 构建 prompt
+        prompt = f"""你是一位经验丰富的新能源汽车维修诊断专家。
+请根据以下多个故障码的综合信息，分析它们之间的关联性，找出共同根因。
+
+## 故障码列表
+"""
+        for i, code in enumerate(codes, 1):
+            prompt += f"{i}. {code}\n"
+
+        prompt += f"\n## 关联性分析\n{correlation_summary}\n\n"
+
+        # 每个码的知识库信息
+        for i, (code, result) in enumerate(zip(codes, results), 1):
+            if result:
+                prompt += f"""### 故障码 {code} 信息
+描述: {result.get('description', '未知')}
+严重程度: {result.get('severity', 'medium')}
+系统: {result.get('system', '未知')}
+"""
+                causes = result.get('common_causes', [])
+                if causes:
+                    prompt += "常见原因:\n"
+                    for cause in causes:
+                        prompt += f"- {cause}\n"
+                prompt += "\n"
+
+        if vehicle_info:
+            prompt += f"## 车型信息\n{vehicle_info}\n\n"
+        if additional_info:
+            prompt += f"## 技师描述的症状\n{additional_info}\n\n"
+
+        # 安全提醒
+        if is_critical:
+            prompt += f"""## ⚠️ 安全警告
+这些故障码中包含「{sev_label}」级别故障，请特别强调高压安全。
+"""
+        else:
+            prompt += """## 安全提醒
+涉及新能源汽车高压系统时，请提醒技师注意高压安全。
+
+"""
+
+        # 输出要求
+        prompt += """## 请按以下步骤进行综合分析
+
+### 1️⃣ 故障码关联性判断
+- 这些故障码之间有什么关联？
+- 是同一根因导致的多个症状，还是独立的多个问题？
+
+### 2️⃣ 系统性分析
+- 如果有关联，共同的根因是什么？
+- 如果无关，哪个故障码最紧急需要优先处理？
+
+### 3️⃣ 综合排查建议
+- 给出一套统一的排查流程（如果有关联）
+- 或者分别给出每个码的排查优先级（如果无关联）
+
+### 4️⃣ 注意事项
+- 维修时的安全注意事项
+- 容易忽视的检查点
+- 多个故障码同时出现时的特殊考虑
+
+请用中文回复，语言专业但易懂。
+"""
+        return prompt

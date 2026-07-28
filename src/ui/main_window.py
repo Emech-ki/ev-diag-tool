@@ -2,6 +2,7 @@
 Main Window — v2.0.0 With Multi-Provider + Vehicle Selector + Model Info
 """
 
+import json
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLineEdit, QPushButton, QLabel, QStatusBar, QMessageBox,
@@ -118,6 +119,104 @@ class DiagnoseWorker(QThread):
                 ai_available=ai_available
             )
             self.finished.emit(result)
+        except Exception as e:
+            self.error.emit(str(e))
+
+
+class MultiDiagnoseWorker(QThread):
+    """多故障码诊断工作线程"""
+    correlation_ready = pyqtSignal(object)    # CorrelationResult
+    kb_ready = pyqtSignal(int, object)        # (index, DiagnosticResult)
+    ai_token = pyqtSignal(str)                # 综合 AI 流式 token
+    ai_finished = pyqtSignal(str)             # 综合 AI 完整文本
+    individual_ai_token = pyqtSignal(int, str)    # (index, token) 单码 AI
+    individual_ai_finished = pyqtSignal(int, str) # (index, text) 单码 AI 完成
+    finished = pyqtSignal(object)             # MultiCodeResult
+    error = pyqtSignal(str)
+
+    def __init__(self, engine: DiagnosticEngine, codes: list, 
+                 vehicle: str = "", extra: str = ""):
+        super().__init__()
+        self.engine = engine
+        self.codes = codes
+        self.vehicle = vehicle
+        self.extra = extra
+
+    def run(self):
+        try:
+            from src.engine.correlation import CorrelationAnalyzer
+            
+            # Phase 1: 关联性分析
+            analyzer = CorrelationAnalyzer(self.engine.kb)
+            correlation = analyzer.analyze(self.codes)
+            self.correlation_ready.emit(correlation)
+
+            # Phase 2: 逐码查询知识库
+            individual_results = []
+            for i, code in enumerate(self.codes):
+                knowledge = self.engine.kb.lookup(code)
+                ai_available = self.engine.llm.is_available()
+                result = DiagnosticResult(
+                    code=code,
+                    knowledge=knowledge,
+                    ai_suggestion=None,
+                    ai_available=ai_available,
+                )
+                individual_results.append(result)
+                self.kb_ready.emit(i, result)
+
+            # Phase 3: AI 建议
+            ai_available = self.engine.llm.is_available()
+            combined_ai = None
+
+            if ai_available:
+                if correlation.is_correlated and len(self.codes) > 1:
+                    # 关联 → 综合 AI
+                    tokens = []
+                    for token in self.engine.llm.get_multi_code_suggestion_stream(
+                        codes=self.codes,
+                        results=individual_results,
+                        correlation=correlation,
+                        vehicle_info=self.vehicle,
+                        additional_info=self.extra,
+                    ):
+                        tokens.append(token)
+                        self.ai_token.emit(token)
+                    combined_ai = "".join(tokens)
+                    self.ai_finished.emit(combined_ai)
+                else:
+                    # 不关联 → 逐码 AI
+                    for i, code in enumerate(self.codes):
+                        knowledge = individual_results[i].knowledge
+                        tokens = []
+                        for token in self.engine.llm.get_diagnostic_suggestion_stream(
+                            code=code,
+                            knowledge=knowledge,
+                            vehicle_info=self.vehicle,
+                            additional_info=self.extra,
+                        ):
+                            tokens.append(token)
+                            self.individual_ai_token.emit(i, token)
+                        ai_text = "".join(tokens)
+                        individual_results[i] = DiagnosticResult(
+                            code=code,
+                            knowledge=knowledge,
+                            ai_suggestion=ai_text,
+                            ai_available=True,
+                        )
+                        self.individual_ai_finished.emit(i, ai_text)
+
+            # Phase 4: 构建最终结果
+            from src.engine.diagnostic import MultiCodeResult
+            multi_result = MultiCodeResult(
+                codes=self.codes,
+                correlation=correlation,
+                individual_results=individual_results,
+                combined_ai_suggestion=combined_ai,
+                combined_ai_available=ai_available,
+            )
+            self.finished.emit(multi_result)
+
         except Exception as e:
             self.error.emit(str(e))
 
@@ -662,7 +761,37 @@ class MainWindow(QMainWindow):
             self._set_dot_status(self.ollama_dot, self.ollama_status_label, True, f"AI Ready ({current})")
             self._init_model_selector_with(models)
         else:
-            self._set_dot_status(self.ollama_dot, self.ollama_status_label, False, f"AI offline ({current})")
+            # 提供更详细的诊断信息
+            if current == "本地模型":
+                # 检查 Ollama 服务是否可达
+                try:
+                    import urllib.request
+                    url = f"{self.engine.llm.provider._base_url}/api/tags"
+                    req = urllib.request.Request(url, method="GET")
+                    with urllib.request.urlopen(req, timeout=3) as response:
+                        data = json.loads(response.read().decode())
+                        available_models = [m["name"] for m in data.get("models", [])]
+                        if available_models:
+                            # Ollama 可达但没有配置的模型
+                            model_name = self.engine.llm.model_name
+                            self._set_dot_status(
+                                self.ollama_dot, self.ollama_status_label, False,
+                                f"模型 '{model_name}' 未找到，请运行: ollama pull {model_name}"
+                            )
+                            # 更新模型列表让用户知道有哪些可用
+                            self._init_model_selector_with(available_models)
+                        else:
+                            self._set_dot_status(
+                                self.ollama_dot, self.ollama_status_label, False,
+                                "Ollama 无可用模型，请运行: ollama pull <模型名>"
+                            )
+                except Exception:
+                    self._set_dot_status(
+                        self.ollama_dot, self.ollama_status_label, False,
+                        "Ollama 未启动，请运行: ollama serve"
+                    )
+            else:
+                self._set_dot_status(self.ollama_dot, self.ollama_status_label, False, f"AI offline ({current})")
 
     def _init_model_selector_with(self, models: list):
         """用已有模型列表初始化模型选择器"""
@@ -729,15 +858,22 @@ class MainWindow(QMainWindow):
     # ── Diagnosis ──
 
     def on_diagnose(self):
-        code = self.code_input.text().strip()
-        if not code:
+        import re
+        raw_text = self.code_input.text().strip()
+        if not raw_text:
             QMessageBox.warning(self, "提示", "请输入故障码")
+            return
+
+        # 解析多个故障码（支持逗号、空格、分号分隔）
+        codes = re.split(r'[,;\s]+', raw_text)
+        codes = [c.strip().upper() for c in codes if c.strip()]
+        
+        if not codes:
+            QMessageBox.warning(self, "提示", "请输入有效的故障码")
             return
 
         self.search_btn.setEnabled(False)
         self.search_btn.setText("诊断中...")
-        self.status_bar.showMessage(f"正在诊断 {code}...")
-
         self.result_panel.clear()
 
         # 断开旧 worker 信号，防止泄漏
@@ -756,18 +892,59 @@ class MainWindow(QMainWindow):
                     self.worker.terminate()
                     self.worker.wait(500)
 
-        self.worker = DiagnoseWorker(
-            engine=self.engine,
-            code=code,
-            vehicle=self._get_vehicle_info(),
-            extra=self.symptom_input.text().strip()
-        )
-        self.worker.kb_ready.connect(self._on_kb_ready)
-        self.worker.ai_token.connect(self._on_ai_token)
-        self.worker.ai_finished.connect(self._on_ai_finished)
-        self.worker.finished.connect(self._on_diagnose_finished)
-        self.worker.error.connect(self._on_diagnose_error)
-        self.worker.start()
+        # 断开旧 multi worker 信号
+        if hasattr(self, '_multi_worker') and self._multi_worker is not None:
+            try:
+                self._multi_worker.correlation_ready.disconnect(self._on_correlation_ready)
+                self._multi_worker.kb_ready.disconnect(self._on_multi_kb_ready)
+                self._multi_worker.ai_token.disconnect(self._on_ai_token)
+                self._multi_worker.ai_finished.disconnect(self._on_multi_ai_finished)
+                self._multi_worker.individual_ai_token.disconnect(self._on_individual_ai_token)
+                self._multi_worker.individual_ai_finished.disconnect(self._on_individual_ai_finished)
+                self._multi_worker.finished.disconnect(self._on_multi_diagnose_finished)
+                self._multi_worker.error.disconnect(self._on_diagnose_error)
+            except TypeError:
+                pass
+            if self._multi_worker.isRunning():
+                self._multi_worker.quit()
+                if not self._multi_worker.wait(1000):
+                    self._multi_worker.terminate()
+                    self._multi_worker.wait(500)
+
+        if len(codes) == 1:
+            # 单码 → 走原有逻辑
+            self.status_bar.showMessage(f"正在诊断 {codes[0]}...")
+            self.worker = DiagnoseWorker(
+                engine=self.engine,
+                code=codes[0],
+                vehicle=self._get_vehicle_info(),
+                extra=self.symptom_input.text().strip()
+            )
+            self.worker.kb_ready.connect(self._on_kb_ready)
+            self.worker.ai_token.connect(self._on_ai_token)
+            self.worker.ai_finished.connect(self._on_ai_finished)
+            self.worker.finished.connect(self._on_diagnose_finished)
+            self.worker.error.connect(self._on_diagnose_error)
+            self.worker.start()
+        else:
+            # 多码 → 走新逻辑
+            self.status_bar.showMessage(f"正在诊断 {len(codes)} 个故障码...")
+            self._multi_worker = MultiDiagnoseWorker(
+                engine=self.engine,
+                codes=codes,
+                vehicle=self._get_vehicle_info(),
+                extra=self.symptom_input.text().strip(),
+            )
+            self._multi_worker.correlation_ready.connect(self._on_correlation_ready)
+            self._multi_worker.kb_ready.connect(self._on_multi_kb_ready)
+            # 综合 AI 流式 token 使用专门的回调
+            self._multi_worker.ai_token.connect(self._on_combined_ai_token)
+            self._multi_worker.ai_finished.connect(self._on_multi_ai_finished)
+            self._multi_worker.individual_ai_token.connect(self._on_individual_ai_token)
+            self._multi_worker.individual_ai_finished.connect(self._on_individual_ai_finished)
+            self._multi_worker.finished.connect(self._on_multi_diagnose_finished)
+            self._multi_worker.error.connect(self._on_diagnose_error)
+            self._multi_worker.start()
 
     def _on_kb_ready(self, result: DiagnosticResult):
         """知识库查询完成，立即展示"""
@@ -824,8 +1001,12 @@ class MainWindow(QMainWindow):
             self.status_bar.showMessage(f"未找到故障码 {code} 的信息")
 
     def _on_ai_token(self, token: str):
-        """收到 AI 流式 token"""
+        """收到 AI 流式 token（单码模式）"""
         self.result_panel.append_ai_text(token)
+
+    def _on_combined_ai_token(self, token: str):
+        """收到综合 AI 流式 token（多码关联模式）"""
+        self.result_panel.append_combined_ai_token(token)
 
     def _on_ai_finished(self, full_text: str):
         """AI 流式完成，重新格式化显示"""
@@ -861,6 +1042,49 @@ class MainWindow(QMainWindow):
         self.search_btn.setEnabled(True)
         self.search_btn.setText("诊断")
         self.status_bar.showMessage(f"诊断异常: {error_msg}")
+
+    # ── 多故障码诊断回调 ──
+
+    def _on_correlation_ready(self, correlation):
+        """关联性分析完成"""
+        if correlation.is_correlated:
+            self.status_bar.showMessage(
+                f"发现 {len(correlation.codes)} 个故障码之间存在关联，正在生成综合诊断..."
+            )
+        else:
+            self.status_bar.showMessage(
+                f"{len(correlation.codes)} 个故障码无关联，将分别诊断..."
+            )
+
+    def _on_multi_kb_ready(self, index, result):
+        """多码诊断中单个码的知识库查询完成"""
+        self.result_panel.show_multi_kb_result(index, result)
+
+    def _on_multi_ai_finished(self, full_text):
+        """综合 AI 建议完成"""
+        self.result_panel.show_combined_ai(full_text)
+        self.search_btn.setEnabled(True)
+        self.search_btn.setText("诊断")
+
+    def _on_individual_ai_token(self, index, token):
+        """单码 AI 流式 token（非关联模式）"""
+        self.result_panel.append_individual_ai_token(index, token)
+
+    def _on_individual_ai_finished(self, index, text):
+        """单码 AI 完成（非关联模式）"""
+        self.result_panel.finalize_individual_ai(index, text)
+
+    def _on_multi_diagnose_finished(self, multi_result):
+        """多码诊断全部完成"""
+        self._save_multi_diagnosis_history(multi_result)
+        self.search_btn.setEnabled(True)
+        self.search_btn.setText("诊断")
+        self.status_bar.showMessage("多故障码诊断完成")
+
+    def _save_multi_diagnosis_history(self, multi_result):
+        """保存多码诊断历史"""
+        for result in multi_result.individual_results:
+            self._save_diagnosis_history(result)
 
     def _export_current_result(self):
         """导出当前诊断结果"""

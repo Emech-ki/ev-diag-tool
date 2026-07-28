@@ -173,7 +173,7 @@ class LLMClient:
         with self._provider_lock:
             provider = self._provider
         if not provider.is_available():
-            return "⚠️ AI 服务未启动，请检查后重试"
+            return "[警告] AI 服务未启动，请检查后重试"
 
         prompt = self.templates.build_diagnostic_prompt(
             code=code,
@@ -185,7 +185,7 @@ class LLMClient:
         try:
             return provider.generate(prompt, AI_TEMPERATURE, AI_MAX_TOKENS)
         except Exception as e:
-            return f"⚠️ AI 诊断生成失败: {str(e)}"
+            return f"[警告] AI 诊断生成失败: {str(e)}"
 
     def get_diagnostic_suggestion_stream(
         self,
@@ -198,7 +198,7 @@ class LLMClient:
         with self._provider_lock:
             provider = self._provider
         if not provider.is_available():
-            yield "⚠️ AI 服务未启动，请检查后重试"
+            yield "[警告] AI 服务未启动，请检查后重试"
             return
 
         prompt = self.templates.build_diagnostic_prompt(
@@ -211,14 +211,14 @@ class LLMClient:
         try:
             yield from provider.generate_stream(prompt, AI_TEMPERATURE, AI_MAX_TOKENS)
         except Exception as e:
-            yield f"⚠️ AI 诊断生成失败: {str(e)}"
+            yield f"[警告] AI 诊断生成失败: {str(e)}"
 
     def chat(self, message: str, context: Optional[List[Dict[str, str]]] = None) -> str:
         """与 AI Agent 对话"""
         with self._provider_lock:
             provider = self._provider
         if not provider.is_available():
-            return "⚠️ AI 服务未启动"
+            return "[警告] AI 服务未启动"
 
         messages = list(context) if context else []
         messages.append({"role": "user", "content": message})
@@ -231,14 +231,14 @@ class LLMClient:
         try:
             return provider.chat(messages, AI_TEMPERATURE, AI_MAX_TOKENS)
         except Exception as e:
-            return f"⚠️ AI 回复生成失败: {str(e)}"
+            return f"[警告] AI 回复生成失败: {str(e)}"
 
     def chat_stream(self, message: str, context: Optional[List[Dict[str, str]]] = None) -> Iterator[str]:
         """与 AI Agent 对话（流式响应）"""
         with self._provider_lock:
             provider = self._provider
         if not provider.is_available():
-            yield "⚠️ AI 服务未启动"
+            yield "[警告] AI 服务未启动"
             return
 
         messages = list(context) if context else []
@@ -252,7 +252,7 @@ class LLMClient:
         try:
             yield from provider.chat_stream(messages, AI_TEMPERATURE, AI_MAX_TOKENS)
         except Exception as e:
-            yield f"⚠️ AI 回复生成失败: {str(e)}"
+            yield f"[警告] AI 回复生成失败: {str(e)}"
 
     def chat_with_tools(
         self,
@@ -276,7 +276,7 @@ class LLMClient:
         with self._provider_lock:
             provider = self._provider
         if not provider.is_available():
-            return {"content": "⚠️ AI 服务未启动", "tool_calls": None}
+            return {"content": "[警告] AI 服务未启动", "tool_calls": None}
 
         try:
             return provider.chat_with_tools(
@@ -285,7 +285,7 @@ class LLMClient:
                 max_tokens if max_tokens is not None else AI_MAX_TOKENS,
             )
         except Exception as e:
-            return {"content": f"⚠️ AI 调用失败: {str(e)}", "tool_calls": None}
+            return {"content": f"[警告] AI 调用失败: {str(e)}", "tool_calls": None}
 
     def chat_with_tools_stream(
         self,
@@ -303,7 +303,7 @@ class LLMClient:
         with self._provider_lock:
             provider = self._provider
         if not provider.is_available():
-            yield StreamEvent("content", content="⚠️ AI 服务未启动")
+            yield StreamEvent("content", content="[警告] AI 服务未启动")
             yield StreamEvent("done")
             return
 
@@ -314,8 +314,82 @@ class LLMClient:
                 max_tokens if max_tokens is not None else AI_MAX_TOKENS,
             )
         except Exception as e:
-            yield StreamEvent("content", content=f"⚠️ AI 调用失败: {str(e)}")
+            yield StreamEvent("content", content=f"[警告] AI 调用失败: {str(e)}")
             yield StreamEvent("done")
+
+    def get_multi_code_suggestion(
+        self,
+        codes: List[str],
+        results: List[Any],
+        correlation: Any,
+        vehicle_info: str = "",
+        additional_info: str = "",
+    ) -> str:
+        """获取多故障码综合 AI 建议"""
+        with self._provider_lock:
+            provider = self._provider
+        if not provider.is_available():
+            return "[警告] AI 服务未启动"
+
+        # 将 DiagnosticResult 转为 dict
+        kb_dicts = []
+        for r in results:
+            if r and hasattr(r, 'knowledge') and r.knowledge:
+                kb_dicts.append(r.knowledge)
+            elif r and isinstance(r, dict):
+                kb_dicts.append(r)
+            else:
+                kb_dicts.append(None)
+
+        prompt = self.templates.build_multi_diagnostic_prompt(
+            codes=codes,
+            results=kb_dicts,
+            correlation_summary=correlation.analysis_summary,
+            vehicle_info=vehicle_info,
+            additional_info=additional_info,
+        )
+
+        try:
+            return provider.generate(prompt, AI_TEMPERATURE, AI_MAX_TOKENS)
+        except Exception as e:
+            return f"[警告] 综合 AI 诊断失败: {str(e)}"
+
+    def get_multi_code_suggestion_stream(
+        self,
+        codes: List[str],
+        results: List[Any],
+        correlation: Any,
+        vehicle_info: str = "",
+        additional_info: str = "",
+    ) -> Iterator[str]:
+        """获取多故障码综合 AI 建议（流式）"""
+        with self._provider_lock:
+            provider = self._provider
+        if not provider.is_available():
+            yield "[警告] AI 服务未启动"
+            return
+
+        kb_dicts = []
+        for r in results:
+            if r and hasattr(r, 'knowledge') and r.knowledge:
+                kb_dicts.append(r.knowledge)
+            elif r and isinstance(r, dict):
+                kb_dicts.append(r)
+            else:
+                kb_dicts.append(None)
+
+        prompt = self.templates.build_multi_diagnostic_prompt(
+            codes=codes,
+            results=kb_dicts,
+            correlation_summary=correlation.analysis_summary,
+            vehicle_info=vehicle_info,
+            additional_info=additional_info,
+        )
+
+        try:
+            yield from provider.generate_stream(prompt, AI_TEMPERATURE, AI_MAX_TOKENS)
+        except Exception as e:
+            yield f"[警告] 综合 AI 诊断失败: {str(e)}"
 
 
 # 便捷函数

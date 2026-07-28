@@ -63,7 +63,7 @@ class OpenAICompatProvider(LLMProvider):
                 return self._available
 
             if not self._api_key:
-                print("  ⚠️ OpenAI API Key 未配置")
+                print("  [警告] OpenAI API Key 未配置")
                 self._available = False
                 return False
 
