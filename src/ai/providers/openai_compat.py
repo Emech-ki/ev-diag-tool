@@ -50,6 +50,8 @@ class OpenAICompatProvider(LLMProvider):
 
     @model_name.setter
     def model_name(self, name: str) -> None:
+        if name == self._model_name:
+            return
         self._model_name = name
         self.reset_availability()
 

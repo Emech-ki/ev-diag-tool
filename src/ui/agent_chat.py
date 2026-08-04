@@ -540,3 +540,6 @@ class AgentChatPanel(QWidget):
         self.btn_start.setStyleSheet(btn_style)
         self.btn_history.setStyleSheet(btn_style)
         self.btn_clear.setStyleSheet(btn_style)
+
+        # 重建聊天内容以更新内联颜色
+        self._rebuild_display()

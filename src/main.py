@@ -10,14 +10,10 @@ EV-Diag-Tool 新能源汽车智能诊断工具
 import sys
 import os
 
-# 将项目根目录加入 Python 路径（兼容调试器运行）
-_file_dir = os.path.dirname(os.path.abspath(__file__))
-PROJECT_ROOT = os.path.dirname(_file_dir)  # ev-diag-tool/
-
-# 确保项目根目录在 sys.path 最前面
-if PROJECT_ROOT in sys.path:
-    sys.path.remove(PROJECT_ROOT)
-sys.path.insert(0, PROJECT_ROOT)
+# 将项目根目录加入 Python 路径
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if PROJECT_ROOT not in sys.path:    
+    sys.path.insert(0, PROJECT_ROOT)
 
 # 加载配置（在其他模块导入之前）
 from src import config

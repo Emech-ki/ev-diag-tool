@@ -2,7 +2,6 @@
 Main Window — v2.0.0 With Multi-Provider + Vehicle Selector + Model Info
 """
 
-import json
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLineEdit, QPushButton, QLabel, QStatusBar, QMessageBox,
@@ -125,17 +124,11 @@ class DiagnoseWorker(QThread):
 
 class MultiDiagnoseWorker(QThread):
     """多故障码诊断工作线程"""
-    correlation_ready = pyqtSignal(object)    # CorrelationResult
-    kb_ready = pyqtSignal(int, object)        # (index, DiagnosticResult)
-    ai_token = pyqtSignal(str)                # 综合 AI 流式 token
-    ai_finished = pyqtSignal(str)             # 综合 AI 完整文本
-    individual_ai_token = pyqtSignal(int, str)    # (index, token) 单码 AI
-    individual_ai_finished = pyqtSignal(int, str) # (index, text) 单码 AI 完成
-    finished = pyqtSignal(object)             # MultiCodeResult
+    progress = pyqtSignal(str)       # 进度信息
+    finished = pyqtSignal(object)    # MultiCodeDiagnosticResult
     error = pyqtSignal(str)
 
-    def __init__(self, engine: DiagnosticEngine, codes: list, 
-                 vehicle: str = "", extra: str = ""):
+    def __init__(self, engine: DiagnosticEngine, codes: list, vehicle: str = "", extra: str = ""):
         super().__init__()
         self.engine = engine
         self.codes = codes
@@ -144,79 +137,13 @@ class MultiDiagnoseWorker(QThread):
 
     def run(self):
         try:
-            from src.engine.correlation import CorrelationAnalyzer
-            
-            # Phase 1: 关联性分析
-            analyzer = CorrelationAnalyzer(self.engine.kb)
-            correlation = analyzer.analyze(self.codes)
-            self.correlation_ready.emit(correlation)
-
-            # Phase 2: 逐码查询知识库
-            individual_results = []
-            for i, code in enumerate(self.codes):
-                knowledge = self.engine.kb.lookup(code)
-                ai_available = self.engine.llm.is_available()
-                result = DiagnosticResult(
-                    code=code,
-                    knowledge=knowledge,
-                    ai_suggestion=None,
-                    ai_available=ai_available,
-                )
-                individual_results.append(result)
-                self.kb_ready.emit(i, result)
-
-            # Phase 3: AI 建议
-            ai_available = self.engine.llm.is_available()
-            combined_ai = None
-
-            if ai_available:
-                if correlation.is_correlated and len(self.codes) > 1:
-                    # 关联 → 综合 AI
-                    tokens = []
-                    for token in self.engine.llm.get_multi_code_suggestion_stream(
-                        codes=self.codes,
-                        results=individual_results,
-                        correlation=correlation,
-                        vehicle_info=self.vehicle,
-                        additional_info=self.extra,
-                    ):
-                        tokens.append(token)
-                        self.ai_token.emit(token)
-                    combined_ai = "".join(tokens)
-                    self.ai_finished.emit(combined_ai)
-                else:
-                    # 不关联 → 逐码 AI
-                    for i, code in enumerate(self.codes):
-                        knowledge = individual_results[i].knowledge
-                        tokens = []
-                        for token in self.engine.llm.get_diagnostic_suggestion_stream(
-                            code=code,
-                            knowledge=knowledge,
-                            vehicle_info=self.vehicle,
-                            additional_info=self.extra,
-                        ):
-                            tokens.append(token)
-                            self.individual_ai_token.emit(i, token)
-                        ai_text = "".join(tokens)
-                        individual_results[i] = DiagnosticResult(
-                            code=code,
-                            knowledge=knowledge,
-                            ai_suggestion=ai_text,
-                            ai_available=True,
-                        )
-                        self.individual_ai_finished.emit(i, ai_text)
-
-            # Phase 4: 构建最终结果
-            from src.engine.diagnostic import MultiCodeResult
-            multi_result = MultiCodeResult(
+            self.progress.emit(f"正在分析 {len(self.codes)} 个故障码...")
+            result = self.engine.diagnose_multiple(
                 codes=self.codes,
-                correlation=correlation,
-                individual_results=individual_results,
-                combined_ai_suggestion=combined_ai,
-                combined_ai_available=ai_available,
+                vehicle_info=self.vehicle,
+                additional_info=self.extra
             )
-            self.finished.emit(multi_result)
-
+            self.finished.emit(result)
         except Exception as e:
             self.error.emit(str(e))
 
@@ -244,6 +171,7 @@ class MainWindow(QMainWindow):
         self.engine = DiagnosticEngine()
         self.worker: Optional[DiagnoseWorker] = None
         self._ai_check_worker = None
+        self._model_selector_updating = False
         self._init_ui()
         self._check_database()
         self._check_ai()
@@ -331,6 +259,25 @@ class MainWindow(QMainWindow):
         self.ollama_status_label.setStyleSheet("color: rgba(255,255,255,0.65); font-size: 11px; margin-left: 4px;")
         brand_layout.addWidget(self.ollama_status_label)
 
+        brand_layout.addSpacing(14)
+
+        # ── Theme Toggle ──
+        self.brand = brand
+        self.theme_btn = QPushButton()
+        self.theme_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.theme_btn.setFixedSize(32, 32)
+        self.theme_btn.setStyleSheet("""
+            QPushButton {
+                background: transparent; border: none;
+                font-size: 16px; color: rgba(255,255,255,0.85);
+            }
+            QPushButton:hover { background: rgba(255,255,255,0.15); border-radius: 6px; }
+        """)
+        self.theme_btn.setToolTip("切换深色/浅色模式")
+        self.theme_btn.clicked.connect(self._on_toggle_theme)
+        brand_layout.addWidget(self.theme_btn)
+        self._update_theme_btn_icon()
+
         main_layout.addWidget(brand)
 
         # ── Content ──
@@ -341,6 +288,7 @@ class MainWindow(QMainWindow):
 
         # ── Search Card ──
         search_card = QFrame()
+        self.search_card = search_card
         search_card.setStyleSheet(f"""
             QFrame {{
                 background-color: {CARD_BG};
@@ -353,6 +301,7 @@ class MainWindow(QMainWindow):
         search_layout.setSpacing(10)
 
         search_title = QLabel("故障码诊断")
+        self.search_title = search_title
         search_title.setStyleSheet(f"font-size: 15px; font-weight: bold; color: {TEXT_PRIMARY};")
         search_layout.addWidget(search_title)
 
@@ -509,6 +458,17 @@ class MainWindow(QMainWindow):
     def _check_ai(self):
         """初始化 provider 选择器 + 检查 AI Provider"""
         self._init_provider_selector()
+        # 手动触发当前选中的 provider 切换（信号被阻止时不会自动触发）
+        current_text = self.provider_selector.currentText()
+        if current_text and current_text != "+ 添加模型...":
+            try:
+                if current_text == "本地模型":
+                    self.engine.llm.switch_to_local()
+                else:
+                    self.engine.llm.switch_to_remote(current_text)
+            except Exception:
+                pass
+        self._refresh_model_list()
         QTimer.singleShot(self.OLLAMA_CHECK_DELAY, self._do_check_ai_async)
 
     _ADD_ENDPOINT_TAG = "__add_endpoint__"
@@ -718,6 +678,7 @@ class MainWindow(QMainWindow):
             models = self.engine.llm.get_available_models()
             current = self.engine.llm.model_name
 
+            self._model_selector_updating = True
             self.model_selector.blockSignals(True)
             self.model_selector.clear()
             self.model_selector.addItems(models)
@@ -729,11 +690,13 @@ class MainWindow(QMainWindow):
                 self.model_selector.setEditText(current)
 
             self.model_selector.blockSignals(False)
+            self._model_selector_updating = False
 
             if not models:
                 name = self.engine.llm.current_endpoint_name
                 self.status_bar.showMessage(f"{name} 无可用模型 — 请检查服务是否启动")
         except Exception as e:
+            self._model_selector_updating = False
             name = self.engine.llm.current_endpoint_name
             self.status_bar.showMessage(f"获取 {name} 模型列表失败: {e}")
 
@@ -761,43 +724,14 @@ class MainWindow(QMainWindow):
             self._set_dot_status(self.ollama_dot, self.ollama_status_label, True, f"AI Ready ({current})")
             self._init_model_selector_with(models)
         else:
-            # 提供更详细的诊断信息
-            if current == "本地模型":
-                # 检查 Ollama 服务是否可达
-                try:
-                    import urllib.request
-                    url = f"{self.engine.llm.provider._base_url}/api/tags"
-                    req = urllib.request.Request(url, method="GET")
-                    with urllib.request.urlopen(req, timeout=3) as response:
-                        data = json.loads(response.read().decode())
-                        available_models = [m["name"] for m in data.get("models", [])]
-                        if available_models:
-                            # Ollama 可达但没有配置的模型
-                            model_name = self.engine.llm.model_name
-                            self._set_dot_status(
-                                self.ollama_dot, self.ollama_status_label, False,
-                                f"模型 '{model_name}' 未找到，请运行: ollama pull {model_name}"
-                            )
-                            # 更新模型列表让用户知道有哪些可用
-                            self._init_model_selector_with(available_models)
-                        else:
-                            self._set_dot_status(
-                                self.ollama_dot, self.ollama_status_label, False,
-                                "Ollama 无可用模型，请运行: ollama pull <模型名>"
-                            )
-                except Exception:
-                    self._set_dot_status(
-                        self.ollama_dot, self.ollama_status_label, False,
-                        "Ollama 未启动，请运行: ollama serve"
-                    )
-            else:
-                self._set_dot_status(self.ollama_dot, self.ollama_status_label, False, f"AI offline ({current})")
+            self._set_dot_status(self.ollama_dot, self.ollama_status_label, False, f"AI offline ({current})")
 
     def _init_model_selector_with(self, models: list):
         """用已有模型列表初始化模型选择器"""
         try:
             current = self.engine.llm.model_name
 
+            self._model_selector_updating = True
             self.model_selector.blockSignals(True)
             self.model_selector.clear()
             self.model_selector.addItems(models)
@@ -809,12 +743,13 @@ class MainWindow(QMainWindow):
                 self.model_selector.setEditText(current)
 
             self.model_selector.blockSignals(False)
+            self._model_selector_updating = False
         except Exception:
-            pass
+            self._model_selector_updating = False
 
     def _on_model_changed(self, model_name: str):
-        """模型切换回调"""
-        if not model_name:
+        """模型切换回调（仅用户手动切换时触发）"""
+        if not model_name or self._model_selector_updating:
             return
         self.engine.llm.set_model(model_name)
         self.engine.llm.reset_availability()
@@ -858,22 +793,31 @@ class MainWindow(QMainWindow):
     # ── Diagnosis ──
 
     def on_diagnose(self):
-        import re
-        raw_text = self.code_input.text().strip()
-        if not raw_text:
+        from src.engine.diagnostic import parse_fault_codes
+
+        input_text = self.code_input.text().strip()
+        if not input_text:
             QMessageBox.warning(self, "提示", "请输入故障码")
             return
 
-        # 解析多个故障码（支持逗号、空格、分号分隔）
-        codes = re.split(r'[,;\s]+', raw_text)
-        codes = [c.strip().upper() for c in codes if c.strip()]
-        
+        # 解析故障码
+        codes = parse_fault_codes(input_text)
         if not codes:
-            QMessageBox.warning(self, "提示", "请输入有效的故障码")
+            QMessageBox.warning(self, "提示", "未识别到有效的故障码格式\n\n支持格式: P0300, P0171 P0420")
             return
 
+        # 单码走原流程，多码走新流程
+        if len(codes) == 1:
+            self._diagnose_single(codes[0])
+        else:
+            self._diagnose_multiple(codes)
+
+    def _diagnose_single(self, code: str):
+        """单故障码诊断流程"""
         self.search_btn.setEnabled(False)
         self.search_btn.setText("诊断中...")
+        self.status_bar.showMessage(f"正在诊断 {code}...")
+
         self.result_panel.clear()
 
         # 断开旧 worker 信号，防止泄漏
@@ -892,59 +836,54 @@ class MainWindow(QMainWindow):
                     self.worker.terminate()
                     self.worker.wait(500)
 
-        # 断开旧 multi worker 信号
-        if hasattr(self, '_multi_worker') and self._multi_worker is not None:
-            try:
-                self._multi_worker.correlation_ready.disconnect(self._on_correlation_ready)
-                self._multi_worker.kb_ready.disconnect(self._on_multi_kb_ready)
-                self._multi_worker.ai_token.disconnect(self._on_ai_token)
-                self._multi_worker.ai_finished.disconnect(self._on_multi_ai_finished)
-                self._multi_worker.individual_ai_token.disconnect(self._on_individual_ai_token)
-                self._multi_worker.individual_ai_finished.disconnect(self._on_individual_ai_finished)
-                self._multi_worker.finished.disconnect(self._on_multi_diagnose_finished)
-                self._multi_worker.error.disconnect(self._on_diagnose_error)
-            except TypeError:
-                pass
-            if self._multi_worker.isRunning():
-                self._multi_worker.quit()
-                if not self._multi_worker.wait(1000):
-                    self._multi_worker.terminate()
-                    self._multi_worker.wait(500)
+        self.worker = DiagnoseWorker(
+            engine=self.engine,
+            code=code,
+            vehicle=self._get_vehicle_info(),
+            extra=self.symptom_input.text().strip()
+        )
+        self.worker.kb_ready.connect(self._on_kb_ready)
+        self.worker.ai_token.connect(self._on_ai_token)
+        self.worker.ai_finished.connect(self._on_ai_finished)
+        self.worker.finished.connect(self._on_diagnose_finished)
+        self.worker.error.connect(self._on_diagnose_error)
+        self.worker.start()
 
-        if len(codes) == 1:
-            # 单码 → 走原有逻辑
-            self.status_bar.showMessage(f"正在诊断 {codes[0]}...")
-            self.worker = DiagnoseWorker(
-                engine=self.engine,
-                code=codes[0],
-                vehicle=self._get_vehicle_info(),
-                extra=self.symptom_input.text().strip()
-            )
-            self.worker.kb_ready.connect(self._on_kb_ready)
-            self.worker.ai_token.connect(self._on_ai_token)
-            self.worker.ai_finished.connect(self._on_ai_finished)
-            self.worker.finished.connect(self._on_diagnose_finished)
-            self.worker.error.connect(self._on_diagnose_error)
-            self.worker.start()
-        else:
-            # 多码 → 走新逻辑
-            self.status_bar.showMessage(f"正在诊断 {len(codes)} 个故障码...")
-            self._multi_worker = MultiDiagnoseWorker(
-                engine=self.engine,
-                codes=codes,
-                vehicle=self._get_vehicle_info(),
-                extra=self.symptom_input.text().strip(),
-            )
-            self._multi_worker.correlation_ready.connect(self._on_correlation_ready)
-            self._multi_worker.kb_ready.connect(self._on_multi_kb_ready)
-            # 综合 AI 流式 token 使用专门的回调
-            self._multi_worker.ai_token.connect(self._on_combined_ai_token)
-            self._multi_worker.ai_finished.connect(self._on_multi_ai_finished)
-            self._multi_worker.individual_ai_token.connect(self._on_individual_ai_token)
-            self._multi_worker.individual_ai_finished.connect(self._on_individual_ai_finished)
-            self._multi_worker.finished.connect(self._on_multi_diagnose_finished)
-            self._multi_worker.error.connect(self._on_diagnose_error)
-            self._multi_worker.start()
+    def _diagnose_multiple(self, codes: list):
+        """多故障码诊断流程"""
+        codes_str = ", ".join(codes)
+        self.search_btn.setEnabled(False)
+        self.search_btn.setText("诊断中...")
+        self.status_bar.showMessage(f"正在分析 {len(codes)} 个故障码: {codes_str}...")
+
+        self.result_panel.clear()
+
+        # 停止旧 worker（安全方式，兼容不同类型的 worker）
+        if self.worker is not None:
+            # 尝试断开所有可能的信号
+            for signal_name in ['kb_ready', 'ai_token', 'ai_finished', 'finished', 'error', 'progress']:
+                signal = getattr(self.worker, signal_name, None)
+                if signal:
+                    try:
+                        signal.disconnect()
+                    except TypeError:
+                        pass
+            if self.worker.isRunning():
+                self.worker.quit()
+                if not self.worker.wait(1000):
+                    self.worker.terminate()
+                    self.worker.wait(500)
+
+        self.worker = MultiDiagnoseWorker(
+            engine=self.engine,
+            codes=codes,
+            vehicle=self._get_vehicle_info(),
+            extra=self.symptom_input.text().strip()
+        )
+        self.worker.progress.connect(self._on_multi_progress)
+        self.worker.finished.connect(self._on_multi_diagnose_finished)
+        self.worker.error.connect(self._on_diagnose_error)
+        self.worker.start()
 
     def _on_kb_ready(self, result: DiagnosticResult):
         """知识库查询完成，立即展示"""
@@ -1001,12 +940,8 @@ class MainWindow(QMainWindow):
             self.status_bar.showMessage(f"未找到故障码 {code} 的信息")
 
     def _on_ai_token(self, token: str):
-        """收到 AI 流式 token（单码模式）"""
+        """收到 AI 流式 token"""
         self.result_panel.append_ai_text(token)
-
-    def _on_combined_ai_token(self, token: str):
-        """收到综合 AI 流式 token（多码关联模式）"""
-        self.result_panel.append_combined_ai_token(token)
 
     def _on_ai_finished(self, full_text: str):
         """AI 流式完成，重新格式化显示"""
@@ -1043,48 +978,52 @@ class MainWindow(QMainWindow):
         self.search_btn.setText("诊断")
         self.status_bar.showMessage(f"诊断异常: {error_msg}")
 
-    # ── 多故障码诊断回调 ──
+    def _on_multi_progress(self, msg: str):
+        """多故障码诊断进度更新"""
+        self.status_bar.showMessage(msg)
 
-    def _on_correlation_ready(self, correlation):
-        """关联性分析完成"""
-        if correlation.is_correlated:
-            self.status_bar.showMessage(
-                f"发现 {len(correlation.codes)} 个故障码之间存在关联，正在生成综合诊断..."
-            )
-        else:
-            self.status_bar.showMessage(
-                f"{len(correlation.codes)} 个故障码无关联，将分别诊断..."
-            )
-
-    def _on_multi_kb_ready(self, index, result):
-        """多码诊断中单个码的知识库查询完成"""
-        self.result_panel.show_multi_kb_result(index, result)
-
-    def _on_multi_ai_finished(self, full_text):
-        """综合 AI 建议完成"""
-        self.result_panel.show_combined_ai(full_text)
+    def _on_multi_diagnose_finished(self, result):
+        """多故障码诊断完成"""
         self.search_btn.setEnabled(True)
         self.search_btn.setText("诊断")
+        self.status_bar.showMessage(f"多故障码分析完成 — {len(result.codes)} 个故障码")
 
-    def _on_individual_ai_token(self, index, token):
-        """单码 AI 流式 token（非关联模式）"""
-        self.result_panel.append_individual_ai_token(index, token)
+        # 显示综合结果
+        self.result_panel.show_multi_code_result(result)
+        self.tab_widget.setCurrentIndex(0)
 
-    def _on_individual_ai_finished(self, index, text):
-        """单码 AI 完成（非关联模式）"""
-        self.result_panel.finalize_individual_ai(index, text)
+        # 保存历史记录
+        self._save_multi_diagnosis_history(result)
 
-    def _on_multi_diagnose_finished(self, multi_result):
-        """多码诊断全部完成"""
-        self._save_multi_diagnosis_history(multi_result)
-        self.search_btn.setEnabled(True)
-        self.search_btn.setText("诊断")
-        self.status_bar.showMessage("多故障码诊断完成")
+    def _save_multi_diagnosis_history(self, result):
+        """保存多故障码诊断记录到历史"""
+        try:
+            vehicle = self._get_vehicle_info()
+            symptom = self.symptom_input.text().strip()
 
-    def _save_multi_diagnosis_history(self, multi_result):
-        """保存多码诊断历史"""
-        for result in multi_result.individual_results:
-            self._save_diagnosis_history(result)
+            # 保存整体记录
+            codes_str = ", ".join(result.codes)
+            self.engine.kb.db.save_history(
+                code=codes_str,
+                vehicle_info=vehicle,
+                symptoms=symptom,
+                knowledge_found=result.has_knowledge(),
+                ai_suggestion=result.ai_suggestion or ""
+            )
+
+            # 保存每个单独记录
+            for r in result.results:
+                self.engine.kb.db.save_history(
+                    code=r.code,
+                    vehicle_info=vehicle,
+                    symptoms=f"[多码分析] {symptom}" if symptom else "[多码分析]",
+                    knowledge_found=r.has_knowledge(),
+                    ai_suggestion=""
+                )
+
+            self.history_panel.refresh()
+        except Exception as e:
+            self.status_bar.showMessage(f"保存历史记录失败: {e}")
 
     def _export_current_result(self):
         """导出当前诊断结果"""
@@ -1191,3 +1130,140 @@ class MainWindow(QMainWindow):
             self.status_bar.showMessage(f"诊断报告已导出: {file_path}")
         except Exception as e:
             QMessageBox.warning(self, "导出失败", f"导出诊断报告失败:\n{e}")
+
+    # ── Theme Methods ──
+
+    def _update_theme_btn_icon(self):
+        """更新主题切换按钮图标"""
+        from src.ui.styles import is_dark
+        self.theme_btn.setText("☀️" if is_dark() else "🌙")
+
+    def _on_toggle_theme(self):
+        """切换深色/浅色模式"""
+        from src.ui.styles import toggle_theme
+        new_theme = toggle_theme()
+        self._update_theme_btn_icon()
+        self._apply_theme()
+        self.status_bar.showMessage(f"已切换到{'深色' if new_theme == 'dark' else '浅色'}模式")
+
+    def _apply_theme(self):
+        """应用当前主题样式 — 使用 get_token() 动态获取值"""
+        from src.ui.styles import get_token, FONT_MONO
+
+        BG = get_token("BG")
+        CARD_BG = get_token("CARD_BG")
+        CARD_BORDER = get_token("CARD_BORDER")
+        TEXT_PRIMARY = get_token("TEXT_PRIMARY")
+        TEXT_SECONDARY = get_token("TEXT_SECONDARY")
+        TEXT_MUTED = get_token("TEXT_MUTED")
+        PRIMARY = get_token("PRIMARY")
+        PRIMARY_DARK = get_token("PRIMARY_DARK")
+        PRIMARY_BG = get_token("PRIMARY_BG")
+        INPUT_BG = get_token("INPUT_BG")
+        INPUT_BORDER = get_token("INPUT_BORDER")
+        INPUT_FOCUS = get_token("INPUT_FOCUS")
+
+        # 主窗口背景
+        self.setStyleSheet(f"QMainWindow {{ background-color: {BG}; }}")
+
+        # 品牌栏
+        self.brand.setStyleSheet(f"background-color: {PRIMARY_DARK};")
+
+        # 搜索卡片
+        self.search_card.setStyleSheet(f"""
+            QFrame {{
+                background-color: {CARD_BG};
+                border: 1px solid {CARD_BORDER};
+                border-radius: 12px;
+            }}
+        """)
+        self.search_title.setStyleSheet(f"font-size: 15px; font-weight: bold; color: {TEXT_PRIMARY};")
+
+        # 代码输入框
+        self.code_input.setStyleSheet(f"""
+            QLineEdit {{
+                font-size: 16px; padding: 8px 14px; font-family: "{FONT_MONO}";
+                border: 2px solid {INPUT_BORDER}; border-radius: 10px;
+                background: {INPUT_BG}; min-height: 26px; color: {TEXT_PRIMARY};
+            }}
+            QLineEdit:focus {{ border-color: {INPUT_FOCUS}; }}
+        """)
+
+        # 搜索按钮
+        self.search_btn.setStyleSheet(f"""
+            QPushButton {{
+                font-size: 15px; font-weight: bold;
+                background-color: {PRIMARY}; color: white;
+                border: none; border-radius: 10px;
+                padding: 4px 32px;
+            }}
+            QPushButton:hover {{ background-color: {PRIMARY_DARK}; }}
+            QPushButton:disabled {{ background-color: #90CAF9; }}
+        """)
+
+        # 车型选择器
+        combo_style = f"""
+            QComboBox {{
+                font-size: 13px; padding: 6px 10px;
+                border: 1px solid {INPUT_BORDER}; border-radius: 8px;
+                background: {INPUT_BG}; min-height: 22px; color: {TEXT_PRIMARY};
+            }}
+            QComboBox:focus {{ border-color: {INPUT_FOCUS}; }}
+            QComboBox::drop-down {{ border: none; width: 20px; }}
+            QComboBox QAbstractItemView {{
+                background-color: {CARD_BG}; color: {TEXT_PRIMARY};
+                border: 1px solid {CARD_BORDER}; selection-background-color: {PRIMARY_BG};
+            }}
+        """
+        self.make_selector.setStyleSheet(combo_style)
+        self.model_selector_vehicle.setStyleSheet(combo_style)
+
+        # 症状输入框
+        self.symptom_input.setStyleSheet(f"""
+            QLineEdit {{
+                font-size: 13px; padding: 6px 10px;
+                border: 1px solid {INPUT_BORDER}; border-radius: 8px;
+                background: {INPUT_BG}; min-height: 22px; color: {TEXT_PRIMARY};
+            }}
+            QLineEdit:focus {{ border-color: {INPUT_FOCUS}; }}
+        """)
+
+        # Tab 组件
+        self.tab_widget.setStyleSheet(f"""
+            QTabWidget::pane {{
+                border: 1px solid {CARD_BORDER};
+                border-radius: 4px;
+                background-color: {CARD_BG};
+            }}
+            QTabBar::tab {{
+                padding: 10px 20px; font-size: 13px;
+                border: 1px solid transparent;
+                border-bottom: none; color: {TEXT_SECONDARY};
+            }}
+            QTabBar::tab:selected {{
+                background-color: {CARD_BG};
+                border-color: {CARD_BORDER};
+                border-bottom: 2px solid {PRIMARY};
+                color: {PRIMARY}; font-weight: bold;
+            }}
+            QTabBar::tab:hover:!selected {{
+                background-color: {PRIMARY_BG};
+            }}
+        """)
+
+        # 状态栏
+        self.status_bar.setStyleSheet(f"""
+            QStatusBar {{
+                background-color: {CARD_BG};
+                border-top: 1px solid {CARD_BORDER};
+                font-size: 11px; color: {TEXT_MUTED}; padding: 2px 16px;
+            }}
+        """)
+
+        # 子面板刷新
+        if hasattr(self, 'result_panel'):
+            self.result_panel.refresh_theme()
+        if hasattr(self, 'agent_panel'):
+            self.agent_panel.refresh_theme()
+        if hasattr(self, 'history_panel'):
+            self.history_panel.refresh_theme()

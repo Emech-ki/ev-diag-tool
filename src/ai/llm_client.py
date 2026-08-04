@@ -13,6 +13,7 @@ from src.config import (
 )
 from src.ai.providers import LLMProvider, StreamEvent, OllamaProvider, OpenAICompatProvider
 from src.ai.prompt_templates import PromptTemplates
+from src.ai.context import DiagnosticContext
 
 
 def create_provider(provider_name: str = None, **kwargs) -> LLMProvider:
@@ -57,15 +58,16 @@ class LLMClient:
                 if cls._instance is None:
                     cls._instance = super().__new__(cls)
                     cls._instance._initialized = False
+                    cls._instance._provider_lock = threading.Lock()
         return cls._instance
 
     def __init__(self, provider: LLMProvider = None):
         if self._initialized:
             return
-        self._provider = provider or create_provider()
-        self._provider_lock = threading.Lock()
-        self.templates = PromptTemplates()
-        self._initialized = True
+        with self._provider_lock:
+            self._provider = provider or create_provider()
+            self.templates = PromptTemplates()
+            self._initialized = True
 
     @property
     def provider(self) -> LLMProvider:
@@ -200,9 +202,10 @@ class LLMClient:
         if not provider.is_available():
             return "⚠️ AI 服务未启动，请检查后重试"
 
-        prompt = self.templates.build_multi_code_diagnostic_prompt(
+        prompt = self.templates.build_multi_diagnostic_prompt(
             codes=codes,
-            knowledge_list=knowledge_list,
+            results=knowledge_list,
+            correlation_summary="",
             vehicle_info=vehicle_info,
             additional_info=additional_info
         )
@@ -349,12 +352,21 @@ class LLMClient:
         correlation: Any,
         vehicle_info: str = "",
         additional_info: str = "",
+        context: Optional[DiagnosticContext] = None,
     ) -> str:
         """获取多故障码综合 AI 建议"""
         with self._provider_lock:
             provider = self._provider
         if not provider.is_available():
             return "[警告] AI 服务未启动"
+
+        # 如果提供了 context，从中提取参数
+        if context is not None:
+            codes = context.codes
+            results = context.results
+            correlation = context.correlation
+            vehicle_info = context.vehicle_info
+            additional_info = context.additional_info
 
         # 将 DiagnosticResult 转为 dict
         kb_dicts = []
@@ -386,6 +398,7 @@ class LLMClient:
         correlation: Any,
         vehicle_info: str = "",
         additional_info: str = "",
+        context: Optional[DiagnosticContext] = None,
     ) -> Iterator[str]:
         """获取多故障码综合 AI 建议（流式）"""
         with self._provider_lock:
@@ -393,6 +406,14 @@ class LLMClient:
         if not provider.is_available():
             yield "[警告] AI 服务未启动"
             return
+
+        # 如果提供了 context，从中提取参数
+        if context is not None:
+            codes = context.codes
+            results = context.results
+            correlation = context.correlation
+            vehicle_info = context.vehicle_info
+            additional_info = context.additional_info
 
         kb_dicts = []
         for r in results:

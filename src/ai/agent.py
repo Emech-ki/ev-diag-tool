@@ -12,7 +12,10 @@ AI Agent 模块 — 阶段三：Tool Calling 版
 """
 
 import json
+import logging
 from typing import Optional, Dict, Any, List, Callable, Iterator
+
+logger = logging.getLogger(__name__)
 
 from src.engine.knowledge_base import KnowledgeBase
 from src.ai.llm_client import LLMClient
@@ -131,8 +134,8 @@ class DiagnosticAgent:
             # LLM 有时会在 content 中输出 JSON 格式的"伪工具调用"，那不是真正的 function calling
             if test_response.get("tool_calls"):
                 return self._run_react_loop(messages, user_message, on_tool_call, on_tool_result, test_response)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Tool calling not supported or failed: {e}")
 
         # 降级模式：预先查询数据，注入上下文，用普通 chat
         # 包括两种情况：
@@ -199,7 +202,8 @@ class DiagnosticAgent:
                     result = self._run_with_prefetch(user_message, on_tool_call, on_tool_result)
                     yield StreamEvent("content", content=result)
                     yield StreamEvent("done")
-                except Exception:
+                except Exception as e:
+                    logger.warning(f"Fallback chat failed: {e}")
                     yield StreamEvent("content", content=f"⚠️ AI 调用失败: {e}")
                     yield StreamEvent("done")
             else:
@@ -207,6 +211,77 @@ class DiagnosticAgent:
                 yield StreamEvent("content", content=f"\n\n⚠️ 流式中断: {e}")
                 yield StreamEvent("done")
             return
+
+    def _execute_tool_calls(
+        self,
+        tool_calls: list,
+        messages: list,
+        called_tools: set,
+        on_tool_call: Optional[Callable] = None,
+        on_tool_result: Optional[Callable] = None,
+    ) -> bool:
+        """
+        执行工具调用列表，返回是否有新调用
+
+        Args:
+            tool_calls: LLM 返回的工具调用列表
+            messages: 消息历史（会追加工具结果）
+            called_tools: 已调用工具的去重集合（会更新）
+            on_tool_call: 工具调用回调
+            on_tool_result: 工具结果回调
+
+        Returns:
+            是否有新的工具调用（非重复）
+        """
+        any_new_call = False
+        for tc in tool_calls:
+            tc_id = tc.get("id", "")
+            func = tc.get("function", {})
+            tool_name = func.get("name", "")
+            tool_args_str = func.get("arguments", "{}")
+
+            # 解析参数
+            try:
+                tool_args = json.loads(tool_args_str) if isinstance(tool_args_str, str) else tool_args_str
+            except json.JSONDecodeError:
+                tool_args = {}
+
+            # 去重检查：防止 LLM 重复调用同一个工具
+            call_key = f"{tool_name}:{json.dumps(tool_args, sort_keys=True)}"
+            if call_key in called_tools:
+                # 已经调用过了，注入提示让 LLM 给出最终回答
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": tc_id,
+                    "content": json.dumps({
+                        "notice": f"你已经调用过 {tool_name}，结果在上面。请基于已有数据给出最终诊断分析，不要再调用工具。",
+                    }, ensure_ascii=False),
+                })
+                continue
+
+            called_tools.add(call_key)
+            any_new_call = True
+
+            # 通知 UI：正在调用工具
+            if on_tool_call:
+                on_tool_call(tool_name, tool_args)
+
+            # 执行工具
+            result_str = self.tools.execute(tool_name, tool_args)
+
+            # 通知 UI：工具返回结果
+            if on_tool_result:
+                summary = result_str[:200] + "..." if len(result_str) > 200 else result_str
+                on_tool_result(tool_name, summary)
+
+            # 把工具结果追加到消息（tool role）
+            messages.append({
+                "role": "tool",
+                "tool_call_id": tc_id,
+                "content": result_str,
+            })
+
+        return any_new_call
 
     def _run_react_loop(
         self,
@@ -242,55 +317,10 @@ class DiagnosticAgent:
             assistant_msg = {"role": "assistant", "content": content or ""}
             messages.append(assistant_msg)
 
-            # 4. 逐个执行工具，结果追加到消息
-            any_new_call = False
-            for tc in tool_calls:
-                tc_id = tc.get("id", "")
-                func = tc.get("function", {})
-                tool_name = func.get("name", "")
-                tool_args_str = func.get("arguments", "{}")
-
-                # 解析参数
-                try:
-                    tool_args = json.loads(tool_args_str) if isinstance(tool_args_str, str) else tool_args_str
-                except json.JSONDecodeError:
-                    tool_args = {}
-
-                # 去重检查：防止 LLM 重复调用同一个工具
-                call_key = f"{tool_name}:{json.dumps(tool_args, sort_keys=True)}"
-                if call_key in called_tools:
-                    # 已经调用过了，注入提示让 LLM 给出最终回答
-                    messages.append({
-                        "role": "tool",
-                        "tool_call_id": tc_id,
-                        "content": json.dumps({
-                            "notice": f"你已经调用过 {tool_name}，结果在上面。请基于已有数据给出最终诊断分析，不要再调用工具。",
-                        }, ensure_ascii=False),
-                    })
-                    # 不设置 any_new_call — 重复调用不算新调用
-                    continue
-
-                called_tools.add(call_key)
-                any_new_call = True
-
-                # 通知 UI：正在调用工具
-                if on_tool_call:
-                    on_tool_call(tool_name, tool_args)
-
-                # 执行工具
-                result_str = self.tools.execute(tool_name, tool_args)
-
-                # 通知 UI：工具返回结果
-                if on_tool_result:
-                    summary = result_str[:200] + "..." if len(result_str) > 200 else result_str
-                    on_tool_result(tool_name, summary)
-
-                # 把工具结果追加到消息（tool role）
-                messages.append({
-                    "role": "tool",
-                    "tool_call_id": tc_id,
-                    "content": result_str,
-                })
+            # 4. 使用共享方法执行工具
+            any_new_call = self._execute_tool_calls(
+                tool_calls, messages, called_tools, on_tool_call, on_tool_result
+            )
 
             # 如果本轮所有工具都是重复的，强制让 LLM 给出最终回答
             if not any_new_call:
@@ -300,7 +330,8 @@ class DiagnosticAgent:
         summary_prompt = "请基于以上所有工具查询的结果，给出最终的诊断分析和建议。"
         try:
             answer = self.llm.chat(message=summary_prompt, context=messages)
-        except Exception:
+        except Exception as e:
+            logger.warning(f"Summary generation failed: {e}")
             answer = "⚠️ 诊断轮次过多，请基于当前信息手动分析。"
         self._history.append({"role": "user", "content": user_message})
         self._history.append({"role": "assistant", "content": answer})
@@ -340,50 +371,10 @@ class DiagnosticAgent:
             assistant_msg = {"role": "assistant", "content": content or ""}
             messages.append(assistant_msg)
 
-            any_new_call = False
-            for tc in tool_calls:
-                tc_id = tc.get("id", "")
-                func = tc.get("function", {})
-                tool_name = func.get("name", "")
-                tool_args_str = func.get("arguments", "{}")
-
-                try:
-                    tool_args = json.loads(tool_args_str) if isinstance(tool_args_str, str) else tool_args_str
-                except json.JSONDecodeError:
-                    tool_args = {}
-
-                # 去重检查
-                call_key = f"{tool_name}:{json.dumps(tool_args, sort_keys=True)}"
-                if call_key in called_tools:
-                    messages.append({
-                        "role": "tool",
-                        "tool_call_id": tc_id,
-                        "content": json.dumps({
-                            "notice": f"你已经调用过 {tool_name}，结果在上面。请基于已有数据给出最终诊断分析，不要再调用工具。",
-                        }, ensure_ascii=False),
-                    })
-                    # 不设置 any_new_call — 重复调用不算新调用
-                    continue
-
-                called_tools.add(call_key)
-                any_new_call = True
-
-                # 通知 UI
-                if on_tool_call:
-                    on_tool_call(tool_name, tool_args)
-
-                # 执行工具
-                result_str = self.tools.execute(tool_name, tool_args)
-
-                if on_tool_result:
-                    summary = result_str[:200] + "..." if len(result_str) > 200 else result_str
-                    on_tool_result(tool_name, summary)
-
-                messages.append({
-                    "role": "tool",
-                    "tool_call_id": tc_id,
-                    "content": result_str,
-                })
+            # 使用共享方法执行工具
+            any_new_call = self._execute_tool_calls(
+                tool_calls, messages, called_tools, on_tool_call, on_tool_result
+            )
 
             if not any_new_call:
                 break
@@ -409,7 +400,8 @@ class DiagnosticAgent:
             summary_prompt = "请基于以上所有工具查询的结果，给出最终的诊断分析和建议。"
             try:
                 answer = self.llm.chat(message=summary_prompt, context=messages)
-            except Exception:
+            except Exception as e:
+                logger.warning(f"Summary generation failed: {e}")
                 answer = "⚠️ 诊断轮次过多，请基于当前信息手动分析。"
             yield StreamEvent("content", content=answer)
             self._history.append({"role": "user", "content": user_message})
@@ -439,7 +431,7 @@ class DiagnosticAgent:
         这样即使没有原生 Tool Calling，Agent 也能利用知识库数据。
         """
         # 根据用户消息智能预查询
-        prefetch_data = self._prefetch_tools(user_message, on_tool_call, on_tool_result)
+        prefetch_data = self._prefetch_knowledge_for_message(user_message, on_tool_call, on_tool_result)
 
         # 把预查询结果注入到用户消息中
         if prefetch_data:
@@ -479,14 +471,14 @@ class DiagnosticAgent:
         self._history.append({"role": "assistant", "content": response})
         return response
 
-    def _prefetch_tools(
+    def _prefetch_knowledge_for_message(
         self,
         user_message: str,
         on_tool_call: Optional[Callable] = None,
         on_tool_result: Optional[Callable] = None,
     ) -> str:
         """
-        根据用户消息，自动判断并执行可能需要的工具
+        根据用户消息，预查询知识库数据作为上下文
         返回所有工具结果的拼接文本
         """
         import re
@@ -681,8 +673,8 @@ class DiagnosticAgent:
                     # P/B/C/U 码按 system 首字母
                     if system.startswith("P") or system.startswith("B"):
                         return "general"
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Expert selection failed: {e}")
 
         # 2. 按用户消息关键词匹配（仅当没有故障码时）
         if not code_upper:

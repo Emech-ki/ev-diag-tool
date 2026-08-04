@@ -5,7 +5,6 @@
 
 import html
 import json
-from datetime import datetime
 from typing import Optional
 
 from PyQt6.QtWidgets import (
@@ -45,8 +44,6 @@ class ResultPanel(QWidget):
         self._current_result = None  # 保存当前诊断结果（用于导出）
         self._ai_stream_started = False
         self._ai_stream_content = ""
-        self._multi_results = []  # 多码诊断结果列表
-        self._individual_ai_contents = {}  # 单码 AI 内容 {index: content}
         self._init_ui()
         self._init_connections()
 
@@ -56,6 +53,7 @@ class ResultPanel(QWidget):
         layout.setSpacing(8)
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
+        self._splitter = splitter
         splitter.setStyleSheet(f"""
             QSplitter::handle {{
                 background-color: {CARD_BORDER};
@@ -92,6 +90,7 @@ class ResultPanel(QWidget):
         ai_layout.setSpacing(8)
 
         ai_header = QFrame()
+        self._ai_header = ai_header
         ai_header.setStyleSheet(f"""
             QFrame {{
                 background-color: {PRIMARY_BG};
@@ -102,6 +101,7 @@ class ResultPanel(QWidget):
         ai_header_layout.setContentsMargins(12, 8, 12, 8)
 
         ai_title = QLabel("AI 诊断建议")
+        self._ai_title = ai_title
         ai_title.setStyleSheet(f"font-size: 14px; font-weight: bold; color: {PRIMARY};")
         ai_header_layout.addWidget(ai_title)
 
@@ -134,6 +134,7 @@ class ResultPanel(QWidget):
         # === 现象录入区 ===
         symptom_card = QFrame()
         symptom_card.setObjectName("card")
+        self._symptom_card = symptom_card
         symptom_card.setStyleSheet(f"""
             QFrame#card {{
                 background-color: #F9FBE7;
@@ -147,6 +148,7 @@ class ResultPanel(QWidget):
 
         symptom_header = QHBoxLayout()
         symptom_title = QLabel("记录观察到的现象")
+        self._symptom_title = symptom_title
         symptom_title.setStyleSheet(f"font-size: 13px; font-weight: bold; color: #558B2F;")
         symptom_header.addWidget(symptom_title)
         symptom_header.addStretch()
@@ -389,11 +391,25 @@ class ResultPanel(QWidget):
         self.ai_status_label.setText("⚠️ AI 服务未连接")
         self.ai_status_label.setStyleSheet("font-size: 12px; color: #FF9800; padding: 4px;")
 
+    def _get_theme_colors(self):
+        from src.ui.styles import get_token
+        return {k: get_token(k) for k in (
+            "PRIMARY", "PRIMARY_DARK", "PRIMARY_LIGHT", "PRIMARY_BG",
+            "BG", "CARD_BG", "CARD_BORDER",
+            "TEXT_PRIMARY", "TEXT_SECONDARY", "TEXT_MUTED",
+            "SUCCESS", "SUCCESS_BG", "WARNING", "WARNING_BG",
+            "DANGER", "DANGER_BG", "CRITICAL", "CRITICAL_BG",
+            "INPUT_BG", "INPUT_BORDER", "INPUT_FOCUS",
+            "SEVERITY_STYLES",
+        )}
+
     def _build_knowledge_html(self, result: DiagnosticResult) -> str:
         """构建知识库信息的 HTML（卡片式布局）"""
+        c = self._get_theme_colors()
         kb = result.knowledge
         severity = kb.get("severity", "medium")
-        sev = SEVERITY_STYLES.get(severity, SEVERITY_STYLES["medium"])
+        sev_styles = c["SEVERITY_STYLES"]
+        sev = sev_styles.get(severity, sev_styles["medium"])
 
         desc = html.escape(kb.get("description", ""))
         sys_info = self.kb.get_system_info(kb.get("system", ""))
@@ -404,7 +420,7 @@ class ResultPanel(QWidget):
 
         kb_html += f"""
             <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 4px;">
-                <span style="font-family: Consolas; font-size: 32px; font-weight: bold; color: {TEXT_PRIMARY};">
+                <span style="font-family: Consolas; font-size: 32px; font-weight: bold; color: {c['TEXT_PRIMARY']};">
                     {html.escape(result.code)}
                 </span>
                 <span style="background-color: {sev['bg']}; color: {sev['text']};
@@ -414,26 +430,26 @@ class ResultPanel(QWidget):
                 </span>
             </div>
 
-            <div style="font-size: 16px; color: {TEXT_SECONDARY}; margin-bottom: 14px;">
+            <div style="font-size: 16px; color: {c['TEXT_SECONDARY']}; margin-bottom: 14px;">
                 {desc}
             </div>
 
-            <div style="display: flex; gap: 16px; font-size: 12px; color: {TEXT_SECONDARY}; margin-bottom: 16px;">
+            <div style="display: flex; gap: 16px; font-size: 12px; color: {c['TEXT_SECONDARY']}; margin-bottom: 16px;">
                 <span>系统: {sys_name}</span>
                 <span>类型: {html.escape(kb.get('code_type', '通用'))}</span>
             </div>
 
-            <div style="height: 1px; background-color: {CARD_BORDER}; margin-bottom: 14px;"></div>
+            <div style="height: 1px; background-color: {c['CARD_BORDER']}; margin-bottom: 14px;"></div>
         """
 
         detail = kb.get("detail", "")
         if detail:
             kb_html += f"""
             <div style="margin-bottom: 14px;">
-                <div style="font-size: 13px; font-weight: bold; color: {TEXT_PRIMARY}; margin-bottom: 6px;">详细说明</div>
-                <div style="font-size: 14px; color: {TEXT_SECONDARY}; line-height: 1.7;">{html.escape(detail)}</div>
+                <div style="font-size: 13px; font-weight: bold; color: {c['TEXT_PRIMARY']}; margin-bottom: 6px;">详细说明</div>
+                <div style="font-size: 14px; color: {c['TEXT_SECONDARY']}; line-height: 1.7;">{html.escape(detail)}</div>
             </div>
-            <div style="height: 1px; background-color: {CARD_BORDER}; margin-bottom: 14px;"></div>
+            <div style="height: 1px; background-color: {c['CARD_BORDER']}; margin-bottom: 14px;"></div>
             """
 
         causes = kb.get("common_causes", [])
@@ -444,15 +460,15 @@ class ResultPanel(QWidget):
                 causes = []
         if causes:
             items = "".join(
-                f'<li style="margin: 6px 0; padding-left: 4px; color: {TEXT_SECONDARY};">{html.escape(c)}</li>'
-                for c in causes
+                f'<li style="margin: 6px 0; padding-left: 4px; color: {c["TEXT_SECONDARY"]};">{html.escape(cause)}</li>'
+                for cause in causes
             )
             kb_html += f"""
             <div style="margin-bottom: 14px;">
-                <div style="font-size: 13px; font-weight: bold; color: {TEXT_PRIMARY}; margin-bottom: 6px;">常见原因</div>
+                <div style="font-size: 13px; font-weight: bold; color: {c['TEXT_PRIMARY']}; margin-bottom: 6px;">常见原因</div>
                 <ul style="margin: 0; padding-left: 20px;">{items}</ul>
             </div>
-            <div style="height: 1px; background-color: {CARD_BORDER}; margin-bottom: 14px;"></div>
+            <div style="height: 1px; background-color: {c['CARD_BORDER']}; margin-bottom: 14px;"></div>
             """
 
         steps = kb.get("diagnostic_steps", [])
@@ -463,15 +479,15 @@ class ResultPanel(QWidget):
                 steps = []
         if steps:
             items = "".join(
-                f'<li style="margin: 8px 0; padding-left: 4px; color: {TEXT_SECONDARY}; line-height: 1.6;">{html.escape(s)}</li>'
+                f'<li style="margin: 8px 0; padding-left: 4px; color: {c["TEXT_SECONDARY"]}; line-height: 1.6;">{html.escape(s)}</li>'
                 for s in steps
             )
             kb_html += f"""
             <div style="margin-bottom: 14px;">
-                <div style="font-size: 13px; font-weight: bold; color: {TEXT_PRIMARY}; margin-bottom: 6px;">诊断步骤</div>
+                <div style="font-size: 13px; font-weight: bold; color: {c['TEXT_PRIMARY']}; margin-bottom: 6px;">诊断步骤</div>
                 <ol style="margin: 0; padding-left: 20px;">{items}</ol>
             </div>
-            <div style="height: 1px; background-color: {CARD_BORDER}; margin-bottom: 14px;"></div>
+            <div style="height: 1px; background-color: {c['CARD_BORDER']}; margin-bottom: 14px;"></div>
             """
 
         related = kb.get("related_codes", [])
@@ -480,14 +496,14 @@ class ResultPanel(QWidget):
         if related:
             chips = " ".join(
                 f'<a href="dtc://{html.escape(r)}" style="text-decoration: none; '
-                f'background-color: {PRIMARY_BG}; color: {PRIMARY}; '
+                f'background-color: {c["PRIMARY_BG"]}; color: {c["PRIMARY"]}; '
                 f'font-family: Consolas; font-size: 12px; padding: 2px 10px; border-radius: 4px;">{html.escape(r)}</a>'
                 for r in related
             )
             kb_html += f"""
-            <div style="height: 1px; background-color: {CARD_BORDER}; margin-bottom: 10px;"></div>
+            <div style="height: 1px; background-color: {c['CARD_BORDER']}; margin-bottom: 10px;"></div>
             <div style="margin-bottom: 4px;">
-                <div style="font-size: 13px; font-weight: bold; color: {TEXT_PRIMARY}; margin-bottom: 6px;">相关故障码</div>
+                <div style="font-size: 13px; font-weight: bold; color: {c['TEXT_PRIMARY']}; margin-bottom: 6px;">相关故障码</div>
                 <div>{chips}</div>
             </div>
             """
@@ -497,17 +513,18 @@ class ResultPanel(QWidget):
 
     def _build_not_found_html(self, result: DiagnosticResult) -> str:
         """构建未找到故障码的 HTML"""
+        c = self._get_theme_colors()
         return f"""
         <div style="text-align: center; margin-top: 60px;
                     font-family: 'Microsoft YaHei UI', sans-serif;">
-            <div style="font-size: 48px; margin-bottom: 12px; color: {CARD_BORDER};">?</div>
-            <div style="font-size: 20px; font-weight: bold; color: {TEXT_PRIMARY}; margin-bottom: 8px;">
+            <div style="font-size: 48px; margin-bottom: 12px; color: {c['CARD_BORDER']};">?</div>
+            <div style="font-size: 20px; font-weight: bold; color: {c['TEXT_PRIMARY']}; margin-bottom: 8px;">
                 未找到故障码 "{html.escape(result.code)}"
             </div>
-            <div style="font-size: 14px; color: {TEXT_SECONDARY};">
+            <div style="font-size: 14px; color: {c['TEXT_SECONDARY']};">
                 该故障码暂未收录到知识库中
             </div>
-            <div style="font-size: 12px; color: {TEXT_MUTED}; margin-top: 20px; line-height: 1.8;">
+            <div style="font-size: 12px; color: {c['TEXT_MUTED']}; margin-top: 20px; line-height: 1.8;">
                 建议：<br>
                 1. 检查故障码格式是否正确（如 P0300）<br>
                 2. 使用 AI 诊断助手进行对话分析
@@ -517,13 +534,223 @@ class ResultPanel(QWidget):
 
     def _build_ai_html(self, result: DiagnosticResult) -> str:
         """构建 AI 建议的 HTML"""
+        c = self._get_theme_colors()
         suggestion = result.ai_suggestion or ""
         rendered = md_to_html(suggestion)
 
         return f"""
         <div style="font-family: 'Microsoft YaHei UI', sans-serif;">
-            <div style="color: {TEXT_SECONDARY}; font-size: 12px; margin-bottom: 12px;">
+            <div style="color: {c['TEXT_SECONDARY']}; font-size: 12px; margin-bottom: 12px;">
                 基于 {html.escape(result.code)} + 车型/症状信息生成
+                <span style="float: right;">{result.timestamp}</span>
+            </div>
+            <div style="color: {c['TEXT_PRIMARY']}; line-height: 1.7; font-size: 14px;">
+                {rendered}
+            </div>
+            <div style="margin-top: 16px; padding: 10px 14px; background-color: {c['WARNING_BG']};
+                        border-radius: 6px; font-size: 12px; color: {c['WARNING']};">
+                AI 建议仅供参考，请结合实际情况和专业判断做出维修决策。
+            </div>
+        </div>
+        """
+
+    def refresh_theme(self):
+        """刷新主题样式 — 使用 theme_helper 获取颜色"""
+        from src.ui.theme_helper import get_theme_colors, get_symptom_colors
+        c = get_theme_colors()
+        sc = get_symptom_colors()
+
+        # 分隔条
+        self._splitter.setStyleSheet(f"""
+            QSplitter::handle {{
+                background-color: {c['CARD_BORDER']};
+                width: 1px;
+            }}
+        """)
+
+        # 知识库浏览器
+        self.knowledge_browser.setStyleSheet(f"""
+            QTextBrowser {{
+                background-color: transparent;
+                border: none;
+                padding: 4px;
+                font-size: 14px;
+                line-height: 1.7;
+                color: {c['TEXT_PRIMARY']};
+            }}
+        """)
+
+        # AI 头部
+        self._ai_header.setStyleSheet(f"""
+            QFrame {{
+                background-color: {c['PRIMARY_BG']};
+                border-radius: 8px; padding: 10px;
+            }}
+        """)
+        self._ai_title.setStyleSheet(f"font-size: 14px; font-weight: bold; color: {c['PRIMARY']};")
+
+        # AI 浏览器
+        self.ai_browser.setStyleSheet(f"""
+            QTextBrowser {{
+                background-color: transparent;
+                border: none;
+                padding: 4px;
+                font-size: 14px;
+                line-height: 1.7;
+                color: {c['TEXT_PRIMARY']};
+            }}
+        """)
+
+        # AI 状态标签
+        self.ai_status_label.setStyleSheet(f"font-size: 11px; color: {c['TEXT_SECONDARY']};")
+
+        # 导出按钮
+        self.export_btn.setStyleSheet(f"""
+            QPushButton {{
+                font-size: 12px;
+                background-color: {c['PRIMARY_BG']}; color: {c['PRIMARY']};
+                border: 1px solid {c['PRIMARY']}; border-radius: 4px;
+                padding: 2px 12px; min-height: 24px;
+            }}
+            QPushButton:hover {{ background-color: {c['PRIMARY']}; color: white; }}
+        """)
+
+        # ── 现象录入区 ──
+        self._symptom_card.setStyleSheet(f"""
+            QFrame#card {{
+                background-color: {sc['symptom_bg']};
+                border: 1px solid {sc['symptom_border']};
+                border-radius: 8px;
+            }}
+        """)
+        self._symptom_title.setStyleSheet(f"font-size: 13px; font-weight: bold; color: {sc['symptom_title_color']};")
+        self.symptom_display.setStyleSheet(f"""
+            font-size: 12px; color: {sc['symptom_text_color']}; padding: 8px;
+            background-color: {sc['symptom_display_bg']};
+            border-radius: 4px;
+        """)
+        self.symptom_input.setStyleSheet(f"""
+            QLineEdit {{
+                font-size: 13px; padding: 6px 10px;
+                border: 1px solid {sc['symptom_border']}; border-radius: 6px;
+                background-color: {c['INPUT_BG']}; min-height: 20px; color: {c['TEXT_PRIMARY']};
+            }}
+            QLineEdit:focus {{ border-color: {c['INPUT_FOCUS']}; }}
+        """)
+        self.symptom_btn.setStyleSheet(f"""
+            QPushButton {{
+                font-size: 13px; font-weight: bold;
+                background-color: {sc['symptom_title_color']}; color: white;
+                border: none; border-radius: 6px;
+                padding: 4px 20px; min-height: 32px;
+            }}
+            QPushButton:hover {{ background-color: {c['PRIMARY']}; }}
+            QPushButton:disabled {{ background-color: #C5E1A5; }}
+        """)
+
+        # 如果有当前结果，重新渲染
+        if self._current_result:
+            self.show_lookup_result(self._current_result)
+
+    def show_multi_code_result(self, result):
+        """
+        显示多故障码诊断结果
+
+        Args:
+            result: MultiCodeDiagnosticResult 对象
+        """
+        self.clear()
+        self._current_result = result
+
+        # 构建知识库区域：显示各故障码信息
+        kb_html = self._build_multi_code_kb_html(result)
+        self.knowledge_browser.setHtml(kb_html)
+
+        # 构建 AI 区域：显示综合分析
+        if result.has_ai():
+            ai_html = self._build_multi_code_ai_html(result)
+            self.ai_browser.setHtml(ai_html)
+            self.ai_status_label.setText(f"✅ {len(result.codes)} 个故障码综合分析已生成（仅供参考）")
+            self.ai_status_label.setStyleSheet("font-size: 12px; color: #4CAF50; padding: 4px;")
+        else:
+            self._show_ai_unavailable()
+
+    def _build_multi_code_kb_html(self, result) -> str:
+        """构建多故障码知识库 HTML"""
+        from src.ui.styles import get_token
+        TEXT_PRIMARY = get_token("TEXT_PRIMARY")
+        TEXT_SECONDARY = get_token("TEXT_SECONDARY")
+        CARD_BORDER = get_token("CARD_BORDER")
+        PRIMARY = get_token("PRIMARY")
+
+        html = f"""
+        <div style="font-family: 'Microsoft YaHei UI', sans-serif; color: {TEXT_PRIMARY};">
+            <div style="font-size: 16px; font-weight: bold; color: {PRIMARY}; margin-bottom: 12px;">
+                多故障码分析 — {len(result.codes)} 个故障码
+            </div>
+            <div style="color: {TEXT_SECONDARY}; font-size: 12px; margin-bottom: 16px;">
+                故障码: {', '.join(result.codes)}
+            </div>
+        """
+
+        for i, r in enumerate(result.codes, 1):
+            kb = result.results[i-1].knowledge if i-1 < len(result.results) else None
+            if kb:
+                severity = kb.get('severity', 'medium')
+                severity_map = {'low': '低', 'medium': '中', 'high': '高', 'critical': '严重'}
+                severity_label = severity_map.get(severity, severity)
+                severity_color = {'low': '#4CAF50', 'medium': '#FF9800', 'high': '#F44336', 'critical': '#9C27B0'}.get(severity, '#FF9800')
+
+                html += f"""
+                <div style="border: 1px solid {CARD_BORDER}; border-radius: 8px; padding: 12px; margin-bottom: 12px;">
+                    <div style="font-size: 14px; font-weight: bold; color: {PRIMARY}; margin-bottom: 8px;">
+                        {i}. {r}
+                        <span style="font-size: 12px; color: {severity_color}; margin-left: 8px;">{severity_label}</span>
+                    </div>
+                    <div style="color: {TEXT_PRIMARY}; margin-bottom: 4px;">
+                        <strong>描述:</strong> {kb.get('description', '未知')}
+                    </div>
+                    <div style="color: {TEXT_SECONDARY}; font-size: 12px;">
+                        <strong>系统:</strong> {kb.get('system', '未知')}
+                    </div>
+                """
+                detail = kb.get('detail', '')
+                if detail:
+                    html += f"""
+                    <div style="color: {TEXT_SECONDARY}; font-size: 12px; margin-top: 4px;">
+                        {detail}
+                    </div>
+                    """
+                html += "</div>"
+            else:
+                html += f"""
+                <div style="border: 1px solid {CARD_BORDER}; border-radius: 8px; padding: 12px; margin-bottom: 12px;">
+                    <div style="font-size: 14px; font-weight: bold; color: {TEXT_PRIMARY};">
+                        {i}. {r}
+                    </div>
+                    <div style="color: {TEXT_SECONDARY}; font-size: 12px;">
+                        知识库中未收录此故障码
+                    </div>
+                </div>
+                """
+
+        html += "</div>"
+        return html
+
+    def _build_multi_code_ai_html(self, result) -> str:
+        """构建多故障码 AI 综合分析 HTML"""
+        from src.ui.styles import get_token
+        TEXT_PRIMARY = get_token("TEXT_PRIMARY")
+        TEXT_SECONDARY = get_token("TEXT_SECONDARY")
+        WARNING_BG = get_token("WARNING_BG")
+        WARNING = get_token("WARNING")
+
+        rendered = md_to_html(result.ai_suggestion)
+
+        return f"""
+        <div style="font-family: 'Microsoft YaHei UI', sans-serif;">
+            <div style="color: {TEXT_SECONDARY}; font-size: 12px; margin-bottom: 12px;">
+                基于 {len(result.codes)} 个故障码的综合分析
                 <span style="float: right;">{result.timestamp}</span>
             </div>
             <div style="color: {TEXT_PRIMARY}; line-height: 1.7; font-size: 14px;">
@@ -531,254 +758,7 @@ class ResultPanel(QWidget):
             </div>
             <div style="margin-top: 16px; padding: 10px 14px; background-color: {WARNING_BG};
                         border-radius: 6px; font-size: 12px; color: {WARNING};">
-                AI 建议仅供参考，请结合实际情况和专业判断做出维修决策。
+                AI 综合分析仅供参考，请结合实际情况和专业判断做出维修决策。
             </div>
         </div>
         """
-
-    # ── 多故障码展示方法 ──
-
-    def show_multi_results(self, codes: list, correlation):
-        """初始化多码结果展示"""
-        self.clear()
-        self._multi_results = [None] * len(codes)
-        self._individual_ai_contents = {}
-        
-        # 构建概览 HTML
-        overview_html = self._build_multi_overview_html(codes, correlation)
-        self.knowledge_browser.setHtml(overview_html)
-        
-        if correlation.is_correlated:
-            self._show_ai_loading()
-            self.ai_status_label.setText("⏳ 综合 AI 诊断生成中...")
-        else:
-            self.ai_browser.clear()
-
-    def show_multi_kb_result(self, index: int, result: DiagnosticResult):
-        """更新多码结果中某个码的知识库信息"""
-        if index >= len(self._multi_results):
-            return
-        
-        self._multi_results[index] = result
-        
-        # 重建完整展示
-        codes = [r.code for r in self._multi_results if r]
-        if codes:
-            html_parts = []
-            for i, r in enumerate(self._multi_results):
-                if r and r.has_knowledge():
-                    html_parts.append(self._build_single_code_section(r, i))
-                elif r:
-                    html_parts.append(self._build_not_found_section(r, i))
-            
-            combined_html = f"""
-            <div style="font-family: 'Microsoft YaHei UI', Consolas, sans-serif;">
-                {''.join(html_parts)}
-            </div>
-            """
-            self.knowledge_browser.setHtml(combined_html)
-
-    def append_combined_ai_token(self, token: str):
-        """追加综合 AI 流式 token（多码关联模式）"""
-        if not hasattr(self, '_combined_ai_content'):
-            self._combined_ai_content = ""
-            self._combined_ai_started = False
-
-        if not self._combined_ai_started:
-            self.ai_browser.clear()
-            self._combined_ai_started = True
-            # 显示头部
-            codes_str = ", ".join(r.code for r in self._multi_results if r)
-            header_html = f"""
-            <div style="font-family: 'Microsoft YaHei UI', sans-serif; margin-bottom: 12px;">
-                <h3 style="color: {PRIMARY}; font-size: 15px; margin-bottom: 8px;">
-                    综合诊断建议（生成中...）
-                </h3>
-                <div style="font-size: 12px; color: {TEXT_SECONDARY}; margin-bottom: 12px;">
-                    {html.escape(codes_str)}
-                </div>
-            </div>
-            """
-            cursor = self.ai_browser.textCursor()
-            cursor.movePosition(QTextCursor.MoveOperation.End)
-            cursor.insertHtml(header_html)
-
-        self._combined_ai_content += token
-        # 流式阶段用基础转义，不做完整 Markdown 渲染
-        escaped = html.escape(token).replace('\n', '<br>')
-        cursor = self.ai_browser.textCursor()
-        cursor.movePosition(QTextCursor.MoveOperation.End)
-        cursor.insertHtml(escaped)
-        self.ai_browser.ensureCursorVisible()
-
-    def show_combined_ai(self, full_text: str):
-        """展示综合 AI 建议"""
-        # 清理流式状态
-        if hasattr(self, '_combined_ai_content'):
-            del self._combined_ai_content
-        if hasattr(self, '_combined_ai_started'):
-            del self._combined_ai_started
-
-        rendered = md_to_html(full_text)
-        codes_str = ", ".join(r.code for r in self._multi_results if r)
-        
-        self.ai_browser.setHtml(f"""
-            <div style="font-family: 'Microsoft YaHei UI', sans-serif;">
-                <div style="color: {TEXT_SECONDARY}; font-size: 12px; margin-bottom: 12px;">
-                    综合分析: {html.escape(codes_str)}
-                    <span style="float: right;">{datetime.now().strftime("%Y-%m-%d %H:%M:%S")}</span>
-                </div>
-                <div style="color: {TEXT_PRIMARY}; line-height: 1.7; font-size: 14px;">
-                    {rendered}
-                </div>
-                <div style="margin-top: 16px; padding: 10px 14px; background-color: {WARNING_BG};
-                            border-radius: 6px; font-size: 12px; color: {WARNING};">
-                    AI 建议仅供参考，请结合实际情况和专业判断做出维修决策。
-                </div>
-            </div>
-        """)
-        self.ai_status_label.setText("✅ 综合 AI 诊断建议已生成（仅供参考）")
-        self.ai_status_label.setStyleSheet("font-size: 12px; color: #4CAF50; padding: 4px;")
-
-    def append_individual_ai_token(self, index: int, token: str):
-        """追加单码 AI 流式 token"""
-        if index not in self._individual_ai_contents:
-            self._individual_ai_contents[index] = ""
-        self._individual_ai_contents[index] += token
-
-        # 更新展示（当前正在处理的码）
-        if index < len(self._multi_results) and self._multi_results[index]:
-            current_code = self._multi_results[index].code
-            # 重建当前码的完整内容，而不是只显示最新 token
-            full_content = self._individual_ai_contents.get(index, "")
-            if full_content:
-                # 清空并重新显示当前码的完整内容
-                self.ai_browser.clear()
-                header_html = f"""
-                <div style="font-family: 'Microsoft YaHei UI', sans-serif; margin-bottom: 12px;">
-                    <h3 style="color: {PRIMARY}; font-size: 15px; margin-bottom: 8px;">
-                        {html.escape(current_code)} 诊断建议（生成中...）
-                    </h3>
-                </div>
-                """
-                cursor = self.ai_browser.textCursor()
-                cursor.movePosition(QTextCursor.MoveOperation.End)
-                cursor.insertHtml(header_html)
-
-                # 插入当前内容（用基础转义，流式阶段不做完整 Markdown 渲染）
-                escaped = html.escape(full_content).replace('\n', '<br>')
-                cursor.insertHtml(escaped)
-                self.ai_browser.ensureCursorVisible()
-
-    def finalize_individual_ai(self, index: int, text: str):
-        """单码 AI 完成，渲染最终 HTML"""
-        if not text or index >= len(self._multi_results):
-            return
-        
-        rendered = md_to_html(text)
-        code = self._multi_results[index].code if self._multi_results[index] else ""
-        
-        # 在 AI 浏览器中追加该码的完整建议
-        new_section = f"""
-        <div style="margin-bottom: 20px; padding-bottom: 16px; border-bottom: 1px solid {CARD_BORDER};">
-            <h3 style="color: {PRIMARY}; font-size: 15px; margin-bottom: 10px;">
-                {html.escape(code)} 诊断建议
-            </h3>
-            <div style="color: {TEXT_PRIMARY}; line-height: 1.7; font-size: 14px;">
-                {rendered}
-            </div>
-        </div>
-        """
-        # 追加到浏览器
-        cursor = self.ai_browser.textCursor()
-        cursor.movePosition(QTextCursor.MoveOperation.End)
-        cursor.insertHtml(new_section)
-        self.ai_browser.ensureCursorVisible()
-
-    def _build_single_code_section(self, result: DiagnosticResult, index: int) -> str:
-        """构建单个故障码的知识库 HTML 区块"""
-        kb = result.knowledge
-        severity = kb.get("severity", "medium")
-        sev = SEVERITY_STYLES.get(severity, SEVERITY_STYLES["medium"])
-        desc = html.escape(kb.get("description", ""))
-        
-        return f"""
-        <div style="margin-bottom: 20px; padding: 16px; 
-                    background: white; border-radius: 8px; 
-                    border: 1px solid {CARD_BORDER};">
-            <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 8px;">
-                <span style="font-family: Consolas; font-size: 24px; font-weight: bold; color: {TEXT_PRIMARY};">
-                    {html.escape(result.code)}
-                </span>
-                <span style="background-color: {sev['bg']}; color: {sev['text']};
-                             font-size: 11px; font-weight: bold; padding: 2px 8px;
-                             border-radius: 4px; border: 1px solid {sev['border']};">
-                    {sev['label']}
-                </span>
-            </div>
-            <div style="font-size: 14px; color: {TEXT_SECONDARY}; margin-bottom: 8px;">
-                {desc}
-            </div>
-        </div>
-        """
-
-    def _build_not_found_section(self, result: DiagnosticResult, index: int) -> str:
-        """构建未找到故障码的区块"""
-        return f"""
-        <div style="margin-bottom: 16px; padding: 12px; 
-                    background: #FFF3E0; border-radius: 8px;
-                    border: 1px solid #FFE0B2;">
-            <span style="font-family: Consolas; font-weight: bold;">{html.escape(result.code)}</span>
-            <span style="color: #E65100; margin-left: 8px;">未在知识库中找到</span>
-        </div>
-        """
-
-    def _build_multi_overview_html(self, codes: list, correlation) -> str:
-        """构建多码概览 HTML"""
-        html_parts = [f"""
-        <div style="font-family: 'Microsoft YaHei UI', Consolas, sans-serif;">
-            <div style="margin-bottom: 16px;">
-                <h2 style="color: {TEXT_PRIMARY}; font-size: 18px; margin-bottom: 8px;">
-                    多故障码诊断
-                </h2>
-                <div style="font-size: 13px; color: {TEXT_SECONDARY};">
-                    共 {len(codes)} 个故障码
-                </div>
-            </div>
-        """]
-        
-        # 关联性状态
-        if correlation.is_correlated:
-            html_parts.append(f"""
-            <div style="padding: 10px 14px; background: #E8F5E9; border-radius: 6px;
-                        border: 1px solid #A5D6A7; margin-bottom: 16px;">
-                <span style="color: #2E7D32; font-weight: bold;">✅ 关联故障</span>
-                <span style="color: #388E3C; font-size: 13px; margin-left: 8px;">
-                    {correlation.analysis_summary}
-                </span>
-            </div>
-            """)
-        else:
-            html_parts.append(f"""
-            <div style="padding: 10px 14px; background: #FFF3E0; border-radius: 6px;
-                        border: 1px solid #FFE0B2; margin-bottom: 16px;">
-                <span style="color: #E65100; font-weight: bold;">⚠️ 独立故障</span>
-                <span style="color: #F57C00; font-size: 13px; margin-left: 8px;">
-                    {correlation.analysis_summary}
-                </span>
-            </div>
-            """)
-        
-        # 码列表
-        for i, code in enumerate(codes, 1):
-            html_parts.append(f"""
-            <div style="padding: 8px 12px; margin-bottom: 4px; 
-                        background: {CARD_BG}; border-radius: 6px;
-                        border: 1px solid {CARD_BORDER};">
-                <span style="font-family: Consolas; font-weight: bold;">{i}. {html.escape(code)}</span>
-                <span style="color: {TEXT_MUTED}; font-size: 12px; margin-left: 8px;">加载中...</span>
-            </div>
-            """)
-        
-        html_parts.append("</div>")
-        return "".join(html_parts)

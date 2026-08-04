@@ -131,21 +131,25 @@ def md_to_html(text: str) -> str:
     text = text.replace("\n", "<br>")
 
     # 14. 还原代码块
+    from src.ui.styles import get_token
+    code_bg = get_token("INPUT_BG")
+    code_border = get_token("CARD_BORDER")
     for idx, (lang, code) in enumerate(code_blocks):
-        lang_label = f'<span style="font-size: 11px; color: #999;">{lang}</span><br>' if lang else ""
+        lang_label = f'<span style="font-size: 11px; color: {get_token("TEXT_MUTED")};">{lang}</span><br>' if lang else ""
         block_html = (
-            f'<div style="background: #F5F5F5; border: 1px solid #E0E0E0; border-radius: 6px; '
+            f'<div style="background: {code_bg}; border: 1px solid {code_border}; border-radius: 6px; '
             f'padding: 10px 14px; margin: 8px 0; font-family: Consolas, monospace; font-size: 13px; '
-            f'line-height: 1.5; overflow-x: auto;">'
+            f'line-height: 1.5; overflow-x: auto; color: {get_token("TEXT_PRIMARY")};">'
             f'{lang_label}{code}</div>'
         )
         text = text.replace(f"__CODE_BLOCK_{idx}__", block_html)
 
     # 15. 还原行内代码
+    inline_bg = get_token("INPUT_BG")
     for idx, code in enumerate(inline_codes):
         inline_html = (
-            f'<code style="background: #F0F0F0; padding: 1px 5px; border-radius: 3px; '
-            f'font-family: Consolas, monospace; font-size: 13px;">{code}</code>'
+            f'<code style="background: {inline_bg}; padding: 1px 5px; border-radius: 3px; '
+            f'font-family: Consolas, monospace; font-size: 13px; color: {get_token("TEXT_PRIMARY")};">{code}</code>'
         )
         text = text.replace(f"__INLINE_CODE_{idx}__", inline_html)
 
