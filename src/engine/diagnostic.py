@@ -65,8 +65,9 @@ def parse_fault_codes(input_text: str) -> List[str]:
     if not input_text:
         return []
 
-    # 使用正则表达式匹配故障码格式: 字母(P/B/C/U) + 数字
-    pattern = r'[PpBbCcUu]\d{4}'
+    # 使用正则表达式匹配故障码格式: 字母(P/B/C/U) + 4位（可能含十六进制字母，如 P0A00）
+    # 注意: 不能用 \d{4}，因为 EV 故障码后 4 位常含 A-F（如 P0A0F、B001A）
+    pattern = r'\b[PpBbCcUu][0-9A-Fa-f]{4}\b'
     matches = re.findall(pattern, input_text)
 
     # 转大写、去重、保持顺序
@@ -147,7 +148,8 @@ class DiagnosticEngine:
         # 1. 批量查询知识库
         knowledge_map = self.kb.lookup_multiple(codes)
 
-        # 2. 构建结果列表
+        # 2. 构建结果列表（is_available 只查一次，避免多次网络探测）
+        ai_available = self.llm.is_available()
         results = []
         for code in codes:
             knowledge = knowledge_map.get(code.upper())
@@ -155,12 +157,11 @@ class DiagnosticEngine:
                 code=code,
                 knowledge=knowledge,
                 ai_suggestion=None,
-                ai_available=self.llm.is_available()
+                ai_available=ai_available
             ))
 
         # 3. 获取 AI 综合分析
         ai_suggestion = None
-        ai_available = self.llm.is_available()
 
         if ai_available:
             try:

@@ -179,7 +179,8 @@ def export_as_html(
     if knowledge:
         severity = knowledge.get("severity", "")
         if severity:
-            sev_class = f"severity-{severity}"
+            # 严重程度进入 HTML class 属性，必须先转义防止属性注入
+            sev_class = f"severity-{html_mod.escape(severity)}"
             content += f'<tr><td class="label">严重程度</td><td><span class="{sev_class}">{_get_severity_label(severity)}</span></td></tr>\n'
         system = knowledge.get("system", "")
         if system:

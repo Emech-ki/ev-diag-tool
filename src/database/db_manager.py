@@ -44,6 +44,9 @@ class DatabaseManager:
     def _ensure_tables(self):
         """检查并创建缺失的表（数据库自动迁移）"""
         from src.database.schema import (
+            CREATE_TABLE_OBD_CODES,
+            CREATE_INDEX_CODE,
+            CREATE_INDEX_SYSTEM,
             CREATE_TABLE_HISTORY,
             CREATE_INDEX_HISTORY_CODE,
             CREATE_INDEX_HISTORY_TIME,
@@ -54,6 +57,11 @@ class DatabaseManager:
         conn = self.get_connection()
         try:
             cursor = conn.cursor()
+
+            # obd_codes 表（用 IF NOT EXISTS 幂等建表，兼容空库/被清空的库）
+            conn.execute(CREATE_TABLE_OBD_CODES)
+            conn.execute(CREATE_INDEX_CODE)
+            conn.execute(CREATE_INDEX_SYSTEM)
 
             # diagnostic_history 表
             cursor.execute(
@@ -266,41 +274,43 @@ class DatabaseManager:
             return False
 
         import time
-        for attempt in range(5):
-            # 读取用普通连接
-            conn = self.get_connection()
-            try:
-                cursor = conn.cursor()
-                row = cursor.execute(
-                    "SELECT symptoms FROM obd_codes WHERE code = ?", (code.upper(),)
-                ).fetchone()
-                if row is None:
-                    return False
+        # 读-改-写用 _write_lock 串行化，防止并发追加时互相覆盖
+        with self._write_lock:
+            for attempt in range(5):
+                # 读取用普通连接
+                conn = self.get_connection()
+                try:
+                    cursor = conn.cursor()
+                    row = cursor.execute(
+                        "SELECT symptoms FROM obd_codes WHERE code = ?", (code.upper(),)
+                    ).fetchone()
+                    if row is None:
+                        return False
 
-                existing = self.parse_json_field(row["symptoms"])
-                if symptom not in existing:
-                    existing.append(symptom)
-                    # 写入用独立连接（autocommit，立即释放锁）
-                    wconn = sqlite3.connect(self.db_path, timeout=30, isolation_level=None)
-                    wconn.execute("PRAGMA busy_timeout=10000")
-                    try:
-                        wconn.execute(
-                            "UPDATE obd_codes SET symptoms = ?, updated_at = CURRENT_TIMESTAMP WHERE code = ?",
-                            (json.dumps(existing, ensure_ascii=False), code.upper()),
-                        )
-                    finally:
-                        wconn.close()
-                return True
-            except sqlite3.OperationalError as e:
-                if "locked" in str(e) and attempt < 4:
-                    time.sleep(1 + attempt)
-                    continue
-                raise
-            except Exception:
-                raise
-            finally:
-                conn.close()
-        return False
+                    existing = self.parse_json_field(row["symptoms"])
+                    if symptom not in existing:
+                        existing.append(symptom)
+                        # 写入用独立连接（autocommit，立即释放锁）
+                        wconn = sqlite3.connect(self.db_path, timeout=30, isolation_level=None)
+                        wconn.execute("PRAGMA busy_timeout=10000")
+                        try:
+                            wconn.execute(
+                                "UPDATE obd_codes SET symptoms = ?, updated_at = CURRENT_TIMESTAMP WHERE code = ?",
+                                (json.dumps(existing, ensure_ascii=False), code.upper()),
+                            )
+                        finally:
+                            wconn.close()
+                    return True
+                except sqlite3.OperationalError as e:
+                    if "locked" in str(e) and attempt < 4:
+                        time.sleep(1 + attempt)
+                        continue
+                    raise
+                except Exception:
+                    raise
+                finally:
+                    conn.close()
+            return False
 
     def get_symptoms(self, code: str) -> list:
         """获取指定故障码的已记录现象列表"""

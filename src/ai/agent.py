@@ -125,22 +125,30 @@ class DiagnosticAgent:
 
         # 先尝试 Tool Calling 模式
         # 只有返回了真正的 tool_calls（不是文本中的 JSON）才走 ReAct 循环
+        test_response = None
         try:
             test_response = self.llm.chat_with_tools(
                 messages=messages[:],  # 用副本测试
                 tools=self.tools.to_openai_format(),
             )
-            # 关键判断：必须有真正的 tool_calls，不能只是 content
-            # LLM 有时会在 content 中输出 JSON 格式的"伪工具调用"，那不是真正的 function calling
-            if test_response.get("tool_calls"):
-                return self._run_react_loop(messages, user_message, on_tool_call, on_tool_result, test_response)
         except Exception as e:
             logger.debug(f"Tool calling not supported or failed: {e}")
+
+        if test_response and test_response.get("tool_calls"):
+            # 有真正的 tool_calls → ReAct 循环（错误由其内部处理，不在此吞掉）
+            return self._run_react_loop(messages, user_message, on_tool_call, on_tool_result, test_response)
+
+        # 没有 tool_calls，但 LLM 直接给出了最终文本回答 → 直接返回，避免浪费一次调用
+        if test_response and (test_response.get("content") or "").strip():
+            final_answer = test_response.get("content").strip()
+            self._history.append({"role": "user", "content": user_message})
+            self._history.append({"role": "assistant", "content": final_answer})
+            return final_answer
 
         # 降级模式：预先查询数据，注入上下文，用普通 chat
         # 包括两种情况：
         # 1. chat_with_tools 抛异常（不支持 tool calling）
-        # 2. chat_with_tools 返回 content 但没有 tool_calls（LLM 没真正调用工具）
+        # 2. chat_with_tools 返回空 content 且无 tool_calls
         return self._run_with_prefetch(user_message, on_tool_call, on_tool_result)
 
     def run_stream(
@@ -212,6 +220,37 @@ class DiagnosticAgent:
                 yield StreamEvent("done")
             return
 
+    def _build_tool_assistant_msg(self, content: str, tool_calls: list) -> dict:
+        """
+        构建携带工具调用的 assistant 消息。
+
+        Ollama 不支持消息历史中的 tool_calls 字段（会返回 400），因此剥离；
+        OpenAI 兼容 API 要求 assistant 消息携带 tool_calls 才能承接 role="tool" 结果。
+        """
+        if not tool_calls:
+            return {"role": "assistant", "content": content or ""}
+        try:
+            is_local = self.llm.is_local
+        except Exception:
+            is_local = False
+        if is_local:
+            return {"role": "assistant", "content": content or ""}
+        return {
+            "role": "assistant",
+            "content": content or "",
+            "tool_calls": [
+                {
+                    "id": tc.get("id", ""),
+                    "type": "function",
+                    "function": {
+                        "name": tc.get("function", {}).get("name", ""),
+                        "arguments": tc.get("function", {}).get("arguments", "{}"),
+                    },
+                }
+                for tc in tool_calls
+            ],
+        }
+
     def _execute_tool_calls(
         self,
         tool_calls: list,
@@ -247,7 +286,7 @@ class DiagnosticAgent:
                 tool_args = {}
 
             # 去重检查：防止 LLM 重复调用同一个工具
-            call_key = f"{tool_name}:{json.dumps(tool_args, sort_keys=True)}"
+            call_key = f"{tool_name}:{json.dumps(tool_args, sort_keys=True, default=str)}"
             if call_key in called_tools:
                 # 已经调用过了，注入提示让 LLM 给出最终回答
                 messages.append({
@@ -311,11 +350,10 @@ class DiagnosticAgent:
                 return final_answer
 
             # 3. LLM 想调用工具 → 执行工具
-            # 注意：不把 tool_calls 字段加入消息历史，
-            # 因为 Ollama 不支持消息历史中的 tool_calls 字段（会返回 400）
-            # 只保留 assistant 的文本内容 + tool 结果
-            assistant_msg = {"role": "assistant", "content": content or ""}
-            messages.append(assistant_msg)
+            # 注意：Ollama 不支持消息历史中的 tool_calls 字段（会返回 400），
+            # 因此 Ollama 剥离 tool_calls，只保留 assistant 文本 + tool 结果；
+            # OpenAI 兼容 API 则必须携带 tool_calls 才能承接 role="tool" 消息。
+            messages.append(self._build_tool_assistant_msg(content, tool_calls))
 
             # 4. 使用共享方法执行工具
             any_new_call = self._execute_tool_calls(
@@ -324,6 +362,15 @@ class DiagnosticAgent:
 
             # 如果本轮所有工具都是重复的，强制让 LLM 给出最终回答
             if not any_new_call:
+                break
+
+            # 5. 下一轮：重新调用 LLM，让它基于工具结果继续推理
+            try:
+                response = self.llm.chat_with_tools(
+                    messages, self.tools.to_openai_format()
+                )
+            except Exception as e:
+                logger.warning(f"Next round chat_with_tools failed: {e}")
                 break
 
         # 如果循环次数用尽，用普通 chat 做总结（不再调用工具）
@@ -368,8 +415,7 @@ class DiagnosticAgent:
                 return
 
             # 有工具调用 → 执行工具
-            assistant_msg = {"role": "assistant", "content": content or ""}
-            messages.append(assistant_msg)
+            messages.append(self._build_tool_assistant_msg(content, tool_calls))
 
             # 使用共享方法执行工具
             any_new_call = self._execute_tool_calls(
@@ -486,8 +532,10 @@ class DiagnosticAgent:
         results = []
         msg_upper = user_message.upper()
 
-        # 1. 检测故障码（如 P0300、B1420、EV-BMS-001）
-        code_pattern = r'\b([PBCUEV][\w-]{3,15})\b'
+        # 1. 检测故障码（如 P0300、P0A0F、B1420、EV-BMS-001）
+        # 注意：不能用宽泛的 [\w-]{3,15}，会把 PLEASE/EVALUATE 等英文单词误判为故障码
+        # P/B/C/U 后必须跟 3~4 位十六进制字符；EV 系统码为 EV-XXX-001 形式
+        code_pattern = r'\b((?:EV-[A-Z]+-\d{3})|[PBCU][0-9A-Fa-f]{3,4})\b'
         codes = re.findall(code_pattern, msg_upper)
 
         for code in codes:

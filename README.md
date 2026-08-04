@@ -10,8 +10,8 @@
 
 | 指标 | 数值 |
 |------|------|
-| **版本** | v3.4.1 |
-| **测试** | 143 个全部通过 |
+| **版本** | v3.4.2 |
+| **测试** | 151 个全部通过 |
 | **故障码** | 8729 条（100% 中文） |
 | **详细信息覆盖** | 98.2%（8575 条） |
 | **车型数据** | 45 款 / 18 品牌 |
@@ -83,7 +83,7 @@ python src/main.py
 ```bash
 python scripts/seed_db.py    # 初始化数据库（含新能源码+车型数据）
 python src/main.py           # 运行程序
-pytest tests/                # 运行测试（143个测试）
+pytest tests/                # 运行测试（151个测试）
 ```
 
 ### 打包成 exe
@@ -313,6 +313,26 @@ ev-diag-tool/
 ---
 
 ## 版本历史
+
+### v3.4.2 — 安全与健壮性修复（2026-08-04）
+
+| # | 严重度 | 修复项 | 文件 |
+|---|--------|--------|------|
+| 1 | 🔴 CRITICAL | `parse_fault_codes` 正则丢弃 63.7% 含十六进制字母的故障码（P0A00/B001A 等），改为 `[0-9A-Fa-f]{4}` | `diagnostic.py` |
+| 2 | 🔴 HIGH | 多码知识库结果 HTML 未转义（XSS 注入） | `result_panel.py` |
+| 3 | 🔴 HIGH | AI 完成提示中故障码未转义（XSS 注入） | `result_panel.py` |
+| 4 | 🔴 HIGH | ReAct 非流式循环缺少下一轮 LLM 调用，多轮推理失效 | `agent.py` |
+| 5 | 🟠 MEDIUM | Ollama/OpenAI Tool Calling 协议不一致导致 OpenAI 端 400 | `agent.py`（`_build_tool_assistant_msg`） |
+| 6 | 🟠 MEDIUM | availability 永久缓存，服务恢复后仍显示不可用（加 30s TTL） | `ollama.py`, `openai_compat.py` |
+| 7 | 🟠 MEDIUM | worker 生命周期：wait 超时无 terminate、窗口关闭不停止线程 | `main_window.py`（`closeEvent`） |
+| 8 | 🟠 MEDIUM | `_ensure_tables` 不创建 obd_codes 表（空库/清库时查询失败） | `db_manager.py` |
+| 9 | 🟠 MEDIUM | `is_available()` 网络调用持有 provider 锁阻塞 UI | `llm_client.py` |
+| 10 | 🟠 MEDIUM | Agent 预查询正则把英文单词误判为故障码（PLEASE→PLEA） | `agent.py` |
+| 11 | 🟡 LOW | markdown 链接未校验协议（`javascript:` 注入） | `markdown_renderer.py` |
+| 12 | 🟡 LOW | 导出严重程度拼接 class 属性未转义、格式判断仅靠扩展名 | `export_utils.py`, `main_window.py` |
+| 13 | 🟡 LOW | `.env` 写入未净化、数值配置解析无容错 | `config.py` |
+| 14 | 🟡 LOW | `record_symptoms` 读改写竞态、多码历史导出查询失败 | `db_manager.py`, `main_window.py` |
+| 15 | 🟡 LOW | AI 流式出错界面卡在"生成中"占位 | `result_panel.py`（`show_ai_error`） |
 
 ### v3.4.1 — Bug 修复（2026-08-04）
 

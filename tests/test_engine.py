@@ -108,6 +108,45 @@ def _setup_test_db(db_path):
     conn.close()
 
 
+class TestParseFaultCodes(unittest.TestCase):
+    """parse_fault_codes 故障码解析测试"""
+
+    def test_simple_codes(self):
+        """纯数字故障码"""
+        from src.engine.diagnostic import parse_fault_codes
+        self.assertEqual(parse_fault_codes("P0300 P0171 C1201 U0100"),
+                         ["P0300", "P0171", "C1201", "U0100"])
+
+    def test_hex_codes(self):
+        """含十六进制字母的故障码（EV 码 P0A00/P0A0F 等）"""
+        from src.engine.diagnostic import parse_fault_codes
+        self.assertEqual(parse_fault_codes("P0A0F P0A1F B001A U01A6"),
+                         ["P0A0F", "P0A1F", "B001A", "U01A6"])
+
+    def test_mixed_with_text(self):
+        """中文/英文混杂输入"""
+        from src.engine.diagnostic import parse_fault_codes
+        self.assertEqual(parse_fault_codes("请检查 P0300 和 P0A0F"),
+                         ["P0300", "P0A0F"])
+
+    def test_deduplicate_preserve_order(self):
+        """去重并保持顺序"""
+        from src.engine.diagnostic import parse_fault_codes
+        self.assertEqual(parse_fault_codes("P0300 p0300 P0171"),
+                         ["P0300", "P0171"])
+
+    def test_empty_input(self):
+        """空输入"""
+        from src.engine.diagnostic import parse_fault_codes
+        self.assertEqual(parse_fault_codes(""), [])
+        self.assertEqual(parse_fault_codes("   "), [])
+
+    def test_invalid_input(self):
+        """无有效故障码"""
+        from src.engine.diagnostic import parse_fault_codes
+        self.assertEqual(parse_fault_codes("hello world"), [])
+
+
 class TestKnowledgeBase(unittest.TestCase):
     """KnowledgeBase 测试"""
 

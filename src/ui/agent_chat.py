@@ -372,8 +372,8 @@ class AgentChatPanel(QWidget):
         self.message_input.clear()
 
         self._set_input_enabled(False)
-        self._start_stream_message()
         self._stop_worker()
+        self._start_stream_message()
 
         self.worker = AgentStreamWorker(self.agent, message)
         self.worker.chunk.connect(self._on_stream_chunk)

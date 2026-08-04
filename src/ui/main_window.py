@@ -177,6 +177,46 @@ class MainWindow(QMainWindow):
         self._check_ai()
         self._load_vehicle_data()
 
+    def closeEvent(self, event):
+        """关闭窗口时停止所有后台线程，避免 QThread 销毁时仍在运行导致崩溃"""
+        # 停止诊断 worker
+        if self.worker is not None:
+            try:
+                self.worker.kb_ready.disconnect(self._on_kb_ready)
+                self.worker.ai_token.disconnect(self._on_ai_token)
+                self.worker.ai_finished.disconnect(self._on_ai_finished)
+                self.worker.finished.disconnect(self._on_diagnose_finished)
+                self.worker.error.disconnect(self._on_diagnose_error)
+            except TypeError:
+                pass
+            if self.worker.isRunning():
+                self.worker.quit()
+                if not self.worker.wait(1000):
+                    self.worker.terminate()
+                    self.worker.wait(500)
+            self.worker.deleteLater()
+            self.worker = None
+
+        # 停止 AI 检查 worker
+        if self._ai_check_worker is not None:
+            if self._ai_check_worker.isRunning():
+                try:
+                    self._ai_check_worker.result.disconnect(self._on_ai_check_done)
+                except TypeError:
+                    pass
+                self._ai_check_worker.quit()
+                if not self._ai_check_worker.wait(500):
+                    self._ai_check_worker.terminate()
+                    self._ai_check_worker.wait(500)
+            self._ai_check_worker.deleteLater()
+            self._ai_check_worker = None
+
+        # 停止 Agent 对话 worker
+        if hasattr(self, 'agent_panel') and hasattr(self.agent_panel, '_stop_worker'):
+            self.agent_panel._stop_worker()
+
+        super().closeEvent(event)
+
     def _init_ui(self):
         self.setWindowTitle(f"EV-Diag-Tool {VERSION_LINE}")
         self.setMinimumSize(1000, 700)
@@ -703,10 +743,18 @@ class MainWindow(QMainWindow):
     def _do_check_ai_async(self):
         """后台线程检查当前 AI Provider，不阻塞 UI"""
         # 停止旧的检查 worker
-        if self._ai_check_worker is not None and self._ai_check_worker.isRunning():
-            self._ai_check_worker.result.disconnect(self._on_ai_check_done)
-            self._ai_check_worker.quit()
-            self._ai_check_worker.wait(500)
+        if self._ai_check_worker is not None:
+            if self._ai_check_worker.isRunning():
+                try:
+                    self._ai_check_worker.result.disconnect(self._on_ai_check_done)
+                except TypeError:
+                    pass
+                self._ai_check_worker.quit()
+                if not self._ai_check_worker.wait(500):
+                    self._ai_check_worker.terminate()
+                    self._ai_check_worker.wait(500)
+            self._ai_check_worker.deleteLater()
+            self._ai_check_worker = None
 
         # 记录发起检查时的 provider，避免结果覆盖用户已切换的 provider
         self._check_target = self.engine.llm.current_endpoint_name
@@ -909,7 +957,9 @@ class MainWindow(QMainWindow):
                 pass
             if self.worker.isRunning():
                 self.worker.quit()
-                self.worker.wait(500)
+                if not self.worker.wait(500):
+                    self.worker.terminate()
+                    self.worker.wait(500)
 
         # 恢复按钮状态
         self.search_btn.setEnabled(True)
@@ -977,6 +1027,9 @@ class MainWindow(QMainWindow):
         self.search_btn.setEnabled(True)
         self.search_btn.setText("诊断")
         self.status_bar.showMessage(f"诊断异常: {error_msg}")
+        # 清理 AI 流式"生成中"占位，避免界面卡在加载状态
+        if hasattr(self, 'result_panel'):
+            self.result_panel.show_ai_error(error_msg)
 
     def _on_multi_progress(self, msg: str):
         """多故障码诊断进度更新"""
@@ -1051,7 +1104,10 @@ class MainWindow(QMainWindow):
             return
 
         try:
-            if file_path.endswith(".html"):
+            is_html = "HTML" in selected_filter or file_path.endswith(".html")
+            if is_html:
+                if not file_path.endswith(".html"):
+                    file_path += ".html"
                 content = export_as_html(
                     code=result.code,
                     knowledge=result.knowledge,
@@ -1089,7 +1145,14 @@ class MainWindow(QMainWindow):
             return
 
         # 重新查询知识库获取完整数据
-        knowledge = self.engine.kb.lookup(code)
+        # 多码历史记录的 code 可能是 "P0300, P0171" 形式，需要拆分查询
+        import re as _re
+        code_parts = _re.findall(r'[PBCU][0-9A-Fa-f]{3,4}', code.upper())
+        if len(code_parts) > 1:
+            knowledge = None  # 多码历史导出不含单一知识库详情
+            code = ", ".join(code_parts)
+        else:
+            knowledge = self.engine.kb.lookup(code)
 
         vehicle_info = record.get("vehicle_info", "")
         symptoms = record.get("symptoms", "")
@@ -1107,7 +1170,10 @@ class MainWindow(QMainWindow):
             return
 
         try:
-            if file_path.endswith(".html"):
+            is_html = "HTML" in selected_filter or file_path.endswith(".html")
+            if is_html:
+                if not file_path.endswith(".html"):
+                    file_path += ".html"
                 content = export_as_html(
                     code=code, knowledge=knowledge,
                     ai_suggestion=ai_suggestion or None,

@@ -353,7 +353,7 @@ class ResultPanel(QWidget):
         self.ai_browser.setHtml(f"""
             <div style="font-family: 'Microsoft YaHei UI', sans-serif;">
                 <div style="color: {TEXT_SECONDARY}; font-size: 12px; margin-bottom: 12px;">
-                    基于 {code} + 车型/症状信息生成
+                    基于 {html.escape(code)} + 车型/症状信息生成
                     <span style="float: right;">{timestamp}</span>
                 </div>
                 <div style="color: {TEXT_PRIMARY}; line-height: 1.7; font-size: 14px;">
@@ -390,6 +390,21 @@ class ResultPanel(QWidget):
         """)
         self.ai_status_label.setText("⚠️ AI 服务未连接")
         self.ai_status_label.setStyleSheet("font-size: 12px; color: #FF9800; padding: 4px;")
+
+    def show_ai_error(self, error_msg: str):
+        """AI 流式生成出错时，清理"生成中"占位并显示错误"""
+        from src.ui.styles import get_token
+        self._ai_stream_started = False
+        self._ai_stream_content = ""
+        self.ai_browser.setHtml(f"""
+            <div style="text-align: center; color: {get_token('TEXT_SECONDARY')}; margin-top: 40px;">
+                <p style="font-size: 24px;">⚠️</p>
+                <p>AI 诊断生成失败</p>
+                <p style="font-size: 12px;">{html.escape(error_msg)}</p>
+            </div>
+        """)
+        self.ai_status_label.setText("❌ AI 生成失败")
+        self.ai_status_label.setStyleSheet("font-size: 12px; color: #F44336; padding: 4px;")
 
     def _get_theme_colors(self):
         from src.ui.styles import get_token
@@ -683,13 +698,14 @@ class ResultPanel(QWidget):
         CARD_BORDER = get_token("CARD_BORDER")
         PRIMARY = get_token("PRIMARY")
 
-        html = f"""
+        codes_escaped = ", ".join(html.escape(c) for c in result.codes)
+        html_out = f"""
         <div style="font-family: 'Microsoft YaHei UI', sans-serif; color: {TEXT_PRIMARY};">
             <div style="font-size: 16px; font-weight: bold; color: {PRIMARY}; margin-bottom: 12px;">
                 多故障码分析 — {len(result.codes)} 个故障码
             </div>
             <div style="color: {TEXT_SECONDARY}; font-size: 12px; margin-bottom: 16px;">
-                故障码: {', '.join(result.codes)}
+                故障码: {codes_escaped}
             </div>
         """
 
@@ -701,32 +717,32 @@ class ResultPanel(QWidget):
                 severity_label = severity_map.get(severity, severity)
                 severity_color = {'low': '#4CAF50', 'medium': '#FF9800', 'high': '#F44336', 'critical': '#9C27B0'}.get(severity, '#FF9800')
 
-                html += f"""
+                html_out += f"""
                 <div style="border: 1px solid {CARD_BORDER}; border-radius: 8px; padding: 12px; margin-bottom: 12px;">
                     <div style="font-size: 14px; font-weight: bold; color: {PRIMARY}; margin-bottom: 8px;">
-                        {i}. {r}
-                        <span style="font-size: 12px; color: {severity_color}; margin-left: 8px;">{severity_label}</span>
+                        {i}. {html.escape(r)}
+                        <span style="font-size: 12px; color: {severity_color}; margin-left: 8px;">{html.escape(severity_label)}</span>
                     </div>
                     <div style="color: {TEXT_PRIMARY}; margin-bottom: 4px;">
-                        <strong>描述:</strong> {kb.get('description', '未知')}
+                        <strong>描述:</strong> {html.escape(kb.get('description', '未知'))}
                     </div>
                     <div style="color: {TEXT_SECONDARY}; font-size: 12px;">
-                        <strong>系统:</strong> {kb.get('system', '未知')}
+                        <strong>系统:</strong> {html.escape(kb.get('system', '未知'))}
                     </div>
                 """
                 detail = kb.get('detail', '')
                 if detail:
-                    html += f"""
+                    html_out += f"""
                     <div style="color: {TEXT_SECONDARY}; font-size: 12px; margin-top: 4px;">
-                        {detail}
+                        {html.escape(detail)}
                     </div>
                     """
-                html += "</div>"
+                html_out += "</div>"
             else:
-                html += f"""
+                html_out += f"""
                 <div style="border: 1px solid {CARD_BORDER}; border-radius: 8px; padding: 12px; margin-bottom: 12px;">
                     <div style="font-size: 14px; font-weight: bold; color: {TEXT_PRIMARY};">
-                        {i}. {r}
+                        {i}. {html.escape(r)}
                     </div>
                     <div style="color: {TEXT_SECONDARY}; font-size: 12px;">
                         知识库中未收录此故障码
@@ -734,8 +750,8 @@ class ResultPanel(QWidget):
                 </div>
                 """
 
-        html += "</div>"
-        return html
+        html_out += "</div>"
+        return html_out
 
     def _build_multi_code_ai_html(self, result) -> str:
         """构建多故障码 AI 综合分析 HTML"""

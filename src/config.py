@@ -28,10 +28,25 @@ OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
 OPENAI_MODEL_NAME = os.getenv("OPENAI_MODEL_NAME", "gpt-4o-mini")
 
 # AI 生成参数
-AI_TEMPERATURE = float(os.getenv("AI_TEMPERATURE", "0.7"))
-AI_MAX_TOKENS = int(os.getenv("AI_MAX_TOKENS", "1024"))
-AI_REQUEST_TIMEOUT = int(os.getenv("AI_REQUEST_TIMEOUT", "90"))
-AI_MAX_RETRIES = int(os.getenv("AI_MAX_RETRIES", "3"))
+# 带默认值容错：.env 中值非法时不崩溃
+def _env_float(key: str, default: float) -> float:
+    try:
+        return float(os.getenv(key, str(default)))
+    except (TypeError, ValueError):
+        return default
+
+
+def _env_int(key: str, default: int) -> int:
+    try:
+        return int(os.getenv(key, str(default)))
+    except (TypeError, ValueError):
+        return default
+
+
+AI_TEMPERATURE = _env_float("AI_TEMPERATURE", 0.7)
+AI_MAX_TOKENS = _env_int("AI_MAX_TOKENS", 1024)
+AI_REQUEST_TIMEOUT = _env_int("AI_REQUEST_TIMEOUT", 90)
+AI_MAX_RETRIES = _env_int("AI_MAX_RETRIES", 3)
 
 # ── 数据库配置 ──
 # 数据库路径（留空则使用默认路径 data/obd_codes.db）
@@ -110,6 +125,13 @@ def get_next_endpoint_index() -> int:
     return max_idx + 1
 
 
+def _sanitize_env_value(value: str) -> str:
+    """清理写入 .env 的值，防止换行等字符破坏 dotenv 格式"""
+    value = value.strip()
+    # 去掉可能破坏 .env 结构的字符
+    return value.replace("\r", " ").replace("\n", " ")
+
+
 def append_endpoint_to_env(name: str, url: str, key: str, model: str) -> int:
     """
     将一个新的 OpenAI 兼容端点追加到 .env 文件。
@@ -127,10 +149,10 @@ def append_endpoint_to_env(name: str, url: str, key: str, model: str) -> int:
 
     # 确保文件末尾有换行
     with open(env_path, "a", encoding="utf-8") as f:
-        f.write(f"\nOPENAI_ENDPOINT_{idx}_NAME={name}\n")
-        f.write(f"OPENAI_ENDPOINT_{idx}_URL={url}\n")
-        f.write(f"OPENAI_ENDPOINT_{idx}_KEY={key}\n")
-        f.write(f"OPENAI_ENDPOINT_{idx}_MODEL={model}\n")
+        f.write(f"\nOPENAI_ENDPOINT_{idx}_NAME={_sanitize_env_value(name)}\n")
+        f.write(f"OPENAI_ENDPOINT_{idx}_URL={_sanitize_env_value(url)}\n")
+        f.write(f"OPENAI_ENDPOINT_{idx}_KEY={_sanitize_env_value(key)}\n")
+        f.write(f"OPENAI_ENDPOINT_{idx}_MODEL={_sanitize_env_value(model)}\n")
 
     # 重新加载 .env 到环境变量（override=True 确保覆盖）
     load_dotenv(env_path, override=True)
@@ -224,9 +246,9 @@ def update_endpoint_in_env(endpoint_name: str, new_url: str, new_key: str, new_m
     # 替换 URL、KEY、MODEL 三行
     prefix = f"OPENAI_ENDPOINT_{target_idx}_"
     replacements = {
-        f"{prefix}URL": new_url,
-        f"{prefix}KEY": new_key,
-        f"{prefix}MODEL": new_model,
+        f"{prefix}URL": _sanitize_env_value(new_url),
+        f"{prefix}KEY": _sanitize_env_value(new_key),
+        f"{prefix}MODEL": _sanitize_env_value(new_model),
     }
 
     new_lines = []

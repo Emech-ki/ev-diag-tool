@@ -150,11 +150,15 @@ class LLMClient:
 
     def is_available(self) -> bool:
         with self._provider_lock:
-            return self._provider.is_available()
+            provider = self._provider
+        # 网络检查放到锁外执行，避免长时间持锁阻塞其他 LLMClient 操作
+        return provider.is_available()
 
     def get_available_models(self) -> List[str]:
         with self._provider_lock:
-            return self._provider.get_models()
+            provider = self._provider
+        # 网络请求放到锁外执行
+        return provider.get_models()
 
     def reset_availability(self):
         with self._provider_lock:

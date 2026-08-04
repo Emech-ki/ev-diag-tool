@@ -18,6 +18,7 @@ from src.config import (
 )
 
 CHECK_TIMEOUT = 5
+AVAILABILITY_TTL = 30  # 可用性缓存有效期（秒），避免服务恢复后长期显示不可用
 
 
 class OpenAICompatProvider(LLMProvider):
@@ -38,6 +39,7 @@ class OpenAICompatProvider(LLMProvider):
         self._base_url = base
         self._model_name = model_name or OPENAI_MODEL_NAME
         self._available = None
+        self._available_at = 0.0
         self._avail_lock = threading.Lock()
 
     @property
@@ -56,17 +58,20 @@ class OpenAICompatProvider(LLMProvider):
         self.reset_availability()
 
     def _check_availability(self) -> bool:
-        """检查 OpenAI 兼容 API 是否可用"""
-        if self._available is not None:
+        """检查 OpenAI 兼容 API 是否可用（结果按 TTL 缓存）"""
+        now = time.time()
+        if self._available is not None and (now - self._available_at) < AVAILABILITY_TTL:
             return self._available
 
         with self._avail_lock:
-            if self._available is not None:
+            now = time.time()
+            if self._available is not None and (now - self._available_at) < AVAILABILITY_TTL:
                 return self._available
 
             if not self._api_key:
                 print("  [警告] OpenAI API Key 未配置")
                 self._available = False
+                self._available_at = time.time()
                 return False
 
             try:
@@ -84,11 +89,13 @@ class OpenAICompatProvider(LLMProvider):
 
                     # 即使模型不在列表中也标记为可用（某些 API 不返回完整列表）
                     self._available = True
+                    self._available_at = time.time()
                     return True
 
             except Exception as e:
                 print(f"  ⚠️ OpenAI 兼容 API 不可用: {e}")
                 self._available = False
+                self._available_at = time.time()
                 return False
 
     def is_available(self) -> bool:
@@ -109,6 +116,7 @@ class OpenAICompatProvider(LLMProvider):
 
     def reset_availability(self):
         self._available = None
+        self._available_at = 0.0
 
     def generate(self, prompt: str, temperature: float = None, max_tokens: int = None) -> str:
         """单次生成 — 使用 chat completions API"""
@@ -238,12 +246,13 @@ class OpenAICompatProvider(LLMProvider):
         if raw_tool_calls:
             tool_calls = []
             for tc in raw_tool_calls:
+                func = tc.get("function") or {}
                 tool_calls.append({
                     "id": tc.get("id", ""),
                     "type": "function",
                     "function": {
-                        "name": tc["function"]["name"],
-                        "arguments": tc["function"]["arguments"],
+                        "name": func.get("name", ""),
+                        "arguments": func.get("arguments", "{}"),
                     },
                 })
 
@@ -409,7 +418,18 @@ class OpenAICompatProvider(LLMProvider):
                 req.add_header("Content-Type", "application/json")
                 req.add_header("Authorization", f"Bearer {self._api_key}")
                 return urllib.request.urlopen(req, timeout=AI_REQUEST_TIMEOUT)
-            except (urllib.error.URLError, urllib.error.HTTPError, ConnectionError, TimeoutError) as e:
+            except urllib.error.HTTPError as e:
+                # 4xx 不重试（无效模型名/密钥过期等），与 _http_request 语义一致
+                if 400 <= e.code < 500:
+                    raise
+                last_error = e
+                if attempt < AI_MAX_RETRIES:
+                    wait = 2 ** attempt
+                    print(f"  ⚠️ OpenAI API 流式连接失败 (尝试 {attempt + 1}/{AI_MAX_RETRIES + 1}): {e}，{wait}秒后重试")
+                    time.sleep(wait)
+                else:
+                    raise last_error
+            except (urllib.error.URLError, ConnectionError, TimeoutError) as e:
                 last_error = e
                 if attempt < AI_MAX_RETRIES:
                     wait = 2 ** attempt

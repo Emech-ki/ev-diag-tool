@@ -18,6 +18,7 @@ from src.config import (
 )
 
 CHECK_TIMEOUT = 3
+AVAILABILITY_TTL = 30  # 可用性缓存有效期（秒），避免服务恢复后长期显示不可用
 
 
 class OllamaProvider(LLMProvider):
@@ -27,6 +28,7 @@ class OllamaProvider(LLMProvider):
         self._model_name = model_name or OLLAMA_MODEL_NAME
         self._base_url = (base_url or OLLAMA_BASE_URL).rstrip("/")
         self._available = None
+        self._available_at = 0.0
         self._avail_lock = threading.Lock()
 
     @property
@@ -45,12 +47,14 @@ class OllamaProvider(LLMProvider):
         self.reset_availability()
 
     def _check_availability(self) -> bool:
-        """检查 Ollama 服务是否可用"""
-        if self._available is not None:
+        """检查 Ollama 服务是否可用（结果按 TTL 缓存）"""
+        now = time.time()
+        if self._available is not None and (now - self._available_at) < AVAILABILITY_TTL:
             return self._available
 
         with self._avail_lock:
-            if self._available is not None:
+            now = time.time()
+            if self._available is not None and (now - self._available_at) < AVAILABILITY_TTL:
                 return self._available
 
             try:
@@ -67,12 +71,14 @@ class OllamaProvider(LLMProvider):
                         print(f"  💡 请运行: ollama pull {self._model_name}")
 
                     self._available = model_available
+                    self._available_at = time.time()
                     return model_available
 
             except Exception as e:
                 print(f"  ⚠️ Ollama 服务不可用: {e}")
                 print(f"  💡 请确保 Ollama 已启动: ollama serve")
                 self._available = False
+                self._available_at = time.time()
                 return False
 
     def is_available(self) -> bool:
@@ -90,6 +96,7 @@ class OllamaProvider(LLMProvider):
 
     def reset_availability(self):
         self._available = None
+        self._available_at = 0.0
 
     def generate(self, prompt: str, temperature: float = None, max_tokens: int = None) -> str:
         temperature = temperature if temperature is not None else AI_TEMPERATURE

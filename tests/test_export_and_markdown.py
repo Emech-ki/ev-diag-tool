@@ -78,6 +78,18 @@ class TestMarkdownToHtml(unittest.TestCase):
         self.assertIn("https://google.com", result)
         self.assertIn("Google", result)
 
+    def test_link_javascript_blocked(self):
+        """javascript: 等危险协议不应生成可点击链接"""
+        result = md_to_html("[bad](javascript:alert(1))")
+        self.assertNotIn('<a href="javascript:', result)
+        # 保留纯文本显示
+        self.assertIn("bad", result)
+
+    def test_link_invalid_scheme_kept_as_text(self):
+        """未知协议链接降级为纯文本"""
+        result = md_to_html("[x](file:///etc/passwd)")
+        self.assertNotIn('<a href="file:', result)
+
     def test_horizontal_rule(self):
         result = md_to_html("---")
         self.assertIn("<hr", result)

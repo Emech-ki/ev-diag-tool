@@ -85,8 +85,13 @@ def md_to_html(text: str) -> str:
     # 7. 删除线
     text = _RE_STRIKETHROUGH.sub(r"<del>\1</del>", text)
 
-    # 8. 链接
-    text = _RE_LINK.sub(r'<a href="\2" style="color: #1565C0; text-decoration: none;">\1</a>', text)
+    # 8. 链接（只允许 http/https 等安全协议，防止 javascript: 等注入）
+    def _safe_link(m):
+        url = m.group(2)
+        if re.match(r'^(https?|dtc)://', url, re.IGNORECASE):
+            return f'<a href="{url}" style="color: #1565C0; text-decoration: none;">{m.group(1)}</a>'
+        return m.group(1)
+    text = _RE_LINK.sub(_safe_link, text)
 
     # 9. 分隔线
     text = _RE_HR.sub('<hr style="border: none; border-top: 1px solid #E0E0E0; margin: 12px 0;">', text)
