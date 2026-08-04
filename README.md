@@ -11,7 +11,7 @@
 | 指标 | 数值 |
 |------|------|
 | **版本** | v3.4.2 |
-| **测试** | 151 个全部通过 |
+| **测试** | 167 个全部通过 |
 | **故障码** | 8729 条（100% 中文） |
 | **详细信息覆盖** | 100%（8729 条） |
 | **车型数据** | 45 款 / 18 品牌 |
@@ -83,7 +83,7 @@ python src/main.py
 ```bash
 python scripts/seed_db.py    # 初始化数据库（含新能源码+车型数据）
 python src/main.py           # 运行程序
-pytest tests/                # 运行测试（151个测试）
+pytest tests/                # 运行测试（167个测试）
 ```
 
 ### 打包成 exe
@@ -290,7 +290,7 @@ ev-diag-tool/
 │   ├── batch_enhance_codes.py # 批量增强脚本
 │   └── ...
 │
-└── tests/                    # 单元测试（151个）
+└── tests/                    # 单元测试（167个）
     ├── test_database.py
     ├── test_engine.py
     ├── test_ai.py
