@@ -200,3 +200,81 @@ def md_to_plain_text(text: str) -> str:
     text = re.sub(r"^>\s?", "  ", text, flags=re.MULTILINE)
 
     return text
+
+
+class StreamMarkdownRenderer:
+    """
+    流式 Markdown 渲染器（增量渲染）
+
+    处理逐 token 到达时跨 token 边界的 **粗体** 标记，避免泄漏字面 '**'。
+    核心：粗体内容延迟到闭合标记到达后再渲染，未闭合时缓冲等待配对。
+    流式结束后调用 flush() 返回剩余缓冲内容（未闭合粗体降级为普通文本）。
+    """
+
+    def __init__(self):
+        self._buf = ""        # 待处理文本
+        self._bold_buf = ""   # 已打开但未闭合的粗体内容
+        self._bold_open = False
+
+    def _render(self, text: str) -> str:
+        escaped = html_mod.escape(text)
+        return escaped.replace("\n", "<br>")
+
+    def append(self, token: str) -> str:
+        """追加一个流式 token，返回可渲染的 HTML 片段"""
+        self._buf += token
+        html = []
+
+        while True:
+            star = self._buf.find("**")
+            if star == -1:
+                break
+            before = self._buf[:star]
+            self._buf = self._buf[star + 2:]
+
+            if self._bold_open:
+                # 闭合粗体
+                content = self._bold_buf + before
+                self._bold_buf = ""
+                self._bold_open = False
+                html.append(f"<strong>{self._render(content)}</strong>")
+            else:
+                # 打开粗体，先渲染粗体前的普通文本
+                html.append(self._render(before))
+                self._bold_open = True
+                self._bold_buf = ""
+
+        if self._bold_open:
+            # 粗体未闭合：非星号内容进粗体缓冲，尾部奇数个 '*' 留在 _buf 等待配对
+            m = re.search(r"\*+$", self._buf)
+            if m and len(m.group()) % 2 == 1:
+                self._bold_buf += self._buf[:m.start()]
+                self._buf = m.group()
+            else:
+                self._bold_buf += self._buf
+                self._buf = ""
+        elif self._buf:
+            # 普通上下文：渲染可确定内容，缓冲尾部奇数个 '*'（可能是 '**' 的一半）
+            m = re.search(r"\*+$", self._buf)
+            if m and len(m.group()) % 2 == 1:
+                renderable = self._buf[:m.start()]
+                self._buf = m.group()
+                if renderable:
+                    html.append(self._render(renderable))
+            else:
+                html.append(self._render(self._buf))
+                self._buf = ""
+
+        return "".join(html)
+
+    def flush(self) -> str:
+        """流式结束后返回剩余缓冲内容（未闭合的粗体降级为普通文本）"""
+        out = []
+        if self._bold_open:
+            out.append(self._render(self._bold_buf))
+            self._bold_buf = ""
+            self._bold_open = False
+        if self._buf:
+            out.append(self._render(self._buf))
+            self._buf = ""
+        return "".join(out)

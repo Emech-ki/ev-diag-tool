@@ -13,7 +13,7 @@
 | **版本** | v3.4.2 |
 | **测试** | 151 个全部通过 |
 | **故障码** | 8729 条（100% 中文） |
-| **详细信息覆盖** | 98.2%（8575 条） |
+| **详细信息覆盖** | 100%（8729 条） |
 | **车型数据** | 45 款 / 18 品牌 |
 
 ---
@@ -90,8 +90,9 @@ pytest tests/                # 运行测试（151个测试）
 
 ```bash
 pip install pyinstaller
-pyinstaller --onefile --windowed --icon=docs/icon.ico src/main.py
-# 生成的 exe 在 dist/ 目录下
+pyinstaller EV-Diag-Tool.spec --noconfirm
+# 生成的 exe 在 dist/ 目录下（名称含版本号，如 EV-Diag-Tool_v3.4.2.exe）
+# 打包前请修改 EV-Diag-Tool.spec 中的 name 字段为当前版本
 ```
 
 ---
@@ -235,7 +236,7 @@ pyinstaller --onefile --windowed --icon=docs/icon.ico src/main.py
 | C-codes (底盘) | 525 | 标准英文 + 中文详细 |
 | B-codes (车身) | 360 | 标准英文 + 中文详细 |
 | EV-codes (新能源) | 60 | 中文详细 |
-| **合计** | **8729** | 98.2% 有详细诊断信息 |
+| **合计** | **8729** | 100% 有详细诊断信息 |
 
 ---
 
@@ -275,7 +276,6 @@ ev-diag-tool/
 │   │   └── schema.py         # 表结构定义
 │   ├── engine/               # 诊断引擎
 │   │   ├── diagnostic.py     # 诊断流程控制
-│   │   ├── correlation.py    # 故障码关联性分析
 │   │   └── knowledge_base.py # 知识库查询
 │   └── ai/                   # AI服务层
 │       ├── llm_client.py     # LLM API客户端
@@ -283,7 +283,6 @@ ev-diag-tool/
 │       ├── agent.py          # AI Agent实现
 │       ├── tools.py          # 工具调用框架
 │       ├── diagnostic_tools.py # 诊断工具集
-│       ├── context.py        # DiagnosticContext 数据类
 │       └── providers/        # LLM Provider抽象层
 │
 ├── scripts/                  # 工具脚本
@@ -291,7 +290,7 @@ ev-diag-tool/
 │   ├── batch_enhance_codes.py # 批量增强脚本
 │   └── ...
 │
-└── tests/                    # 单元测试（143个）
+└── tests/                    # 单元测试（151个）
     ├── test_database.py
     ├── test_engine.py
     ├── test_ai.py
@@ -313,6 +312,18 @@ ev-diag-tool/
 ---
 
 ## 版本历史
+
+### v3.4.2 — 死代码清理 + 流式渲染修复 + CI（2026-08-04）
+
+| # | 修复项 | 文件 |
+|---|--------|------|
+| 1 | 清理死代码：`diagnose_multi`/`MultiCodeResult`/`CorrelationAnalyzer`/`CorrelationResult`/`export_multi_as_text`/`export_multi_as_html`/`get_multi_code_suggestion`/`DiagnosticContext`（均无调用点） | `diagnostic.py`, `correlation.py`(删), `export_utils.py`, `llm_client.py`, `context.py`(删) |
+| 2 | 流式粗体跨 token 泄漏字面 `**`（逐字符/分段到达时）→ 新增 `StreamMarkdownRenderer` 状态机，粗体内容延迟到闭合后渲染 | `markdown_renderer.py`, `agent_chat.py` |
+| 3 | GitHub Actions CI（Python 3.10/3.11/3.12 + pytest） | `.github/workflows/ci.yml` |
+| 4 | 数据覆盖 98.2% → 100%（8729 条全部有详情） | 文档同步 |
+| 5 | 补 ReAct 主循环测试（直接回答/工具循环/Ollama 剥离/OpenAI 保留/去重/超限/降级） | `test_ai.py` |
+| 6 | 更新打包 spec：移除已删模块 hiddenimports、exe 名 → v3.4.2 | `EV-Diag-Tool.spec` |
+| 7 | 测试总数 151 → 167 | `test_export_and_markdown.py`, `test_ai.py` |
 
 ### v3.4.2 — 安全与健壮性修复（2026-08-04）
 

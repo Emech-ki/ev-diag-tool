@@ -22,13 +22,11 @@ src/
 │   └── schema.py        # 表结构
 ├── engine/
 │   ├── diagnostic.py    # 单/多码诊断流程 + parse_fault_codes
-│   ├── knowledge_base.py
-│   └── correlation.py   # 故障码关联分析（注意：仅被已废弃的 diagnose_multi 使用）
+│   └── knowledge_base.py
 └── ai/
     ├── llm_client.py    # 单例代理，_provider_lock 保护 provider 切换
     ├── agent.py         # ReAct Agent（流式 Tool Calling）
     ├── diagnostic_tools.py  # 诊断工具集（9+ 工具）
-    ├── context.py       # DiagnosticContext 数据类
     └── providers/       # LLMProvider 抽象 + Ollama + OpenAI兼容
 ```
 
@@ -37,7 +35,7 @@ src/
 ```bash
 python scripts/seed_db.py    # 初始化数据库（8729 码 + 45 车型）
 python src/main.py           # 运行程序
-pytest tests/                # 151 个测试
+pytest tests/                # 167 个测试
 ```
 
 ## 核心架构要点
@@ -63,17 +61,17 @@ pytest tests/                # 151 个测试
 1. **Ollama 不支持消息历史中的 `tool_calls` 字段**（返回 400）。`agent.py` 用 `_build_tool_assistant_msg()` 按 provider 区分：Ollama 剥离 tool_calls，OpenAI 必须携带
 2. **availability 缓存有 TTL**（30s）：`_available` + `_available_at`，服务恢复后不会永久显示不可用
 3. **`LLMClient.is_available()`** 网络调用在锁外执行（避免长持锁冻结 UI）
-4. **`diagnose_multi` + `CorrelationAnalyzer.analyze` 是死代码**，UI 实际走 `diagnose_multiple`（`main_window._diagnose_multiple`）
+4. **多码诊断**：UI 走 `diagnose_multiple`（`main_window._diagnose_multiple`），无关联性分析（correlation 模块已移除）
 5. **模型选择器初始化**：`_model_selector_updating` 保护标志防止误触发 `_on_model_changed`
 6. `.env` 写入用 `_sanitize_env_value()` 防注入；数值配置有默认值容错
 
 ## 当前状态
 
 - **版本**：v3.4.2（Security & Robustness Fixes）
-- **测试**：151 个全部通过
-- **数据库**：8729 故障码（98.2% 有详情）+ 45 车型
+- **测试**：167 个全部通过
+- **数据库**：8729 故障码（100% 有详情）+ 45 车型
 - **AI 配置**：`.env` 指向本地 Ollama `qwen2.5:7b`
-- **打包**：`pyinstaller --onefile --windowed --icon=docs/icon.ico src/main.py`
+- **打包**：`pyinstaller EV-Diag-Tool.spec --noconfirm`（spec 内改 name 为当前版本号）
 
 ## 已修复的高危问题（v3.4.2 已提交）
 
@@ -86,3 +84,5 @@ pytest tests/                # 151 个测试
 | 🟠 | availability 永久缓存 | 加 30s TTL |
 | 🟠 | worker 生命周期（wait 超时无 terminate、无 closeEvent） | 补 terminate + `closeEvent` |
 | 🟠 | `_ensure_tables` 不建 obd_codes 表 | 补幂等建表 |
+| 🟠 | 流式粗体跨 token 泄漏字面 `**` | `StreamMarkdownRenderer` 状态机（粗体延迟到闭合渲染） |
+| 🟢 | 死代码 `diagnose_multi`/correlation/context 等 | 全部删除（无调用点，167 测试验证） |

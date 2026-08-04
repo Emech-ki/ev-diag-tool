@@ -13,7 +13,6 @@ from src.config import (
 )
 from src.ai.providers import LLMProvider, StreamEvent, OllamaProvider, OpenAICompatProvider
 from src.ai.prompt_templates import PromptTemplates
-from src.ai.context import DiagnosticContext
 
 
 def create_provider(provider_name: str = None, **kwargs) -> LLMProvider:
@@ -348,98 +347,6 @@ class LLMClient:
         except Exception as e:
             yield StreamEvent("content", content=f"[警告] AI 调用失败: {str(e)}")
             yield StreamEvent("done")
-
-    def get_multi_code_suggestion(
-        self,
-        codes: List[str],
-        results: List[Any],
-        correlation: Any,
-        vehicle_info: str = "",
-        additional_info: str = "",
-        context: Optional[DiagnosticContext] = None,
-    ) -> str:
-        """获取多故障码综合 AI 建议"""
-        with self._provider_lock:
-            provider = self._provider
-        if not provider.is_available():
-            return "[警告] AI 服务未启动"
-
-        # 如果提供了 context，从中提取参数
-        if context is not None:
-            codes = context.codes
-            results = context.results
-            correlation = context.correlation
-            vehicle_info = context.vehicle_info
-            additional_info = context.additional_info
-
-        # 将 DiagnosticResult 转为 dict
-        kb_dicts = []
-        for r in results:
-            if r and hasattr(r, 'knowledge') and r.knowledge:
-                kb_dicts.append(r.knowledge)
-            elif r and isinstance(r, dict):
-                kb_dicts.append(r)
-            else:
-                kb_dicts.append(None)
-
-        prompt = self.templates.build_multi_diagnostic_prompt(
-            codes=codes,
-            results=kb_dicts,
-            correlation_summary=correlation.analysis_summary,
-            vehicle_info=vehicle_info,
-            additional_info=additional_info,
-        )
-
-        try:
-            return provider.generate(prompt, AI_TEMPERATURE, AI_MAX_TOKENS)
-        except Exception as e:
-            return f"[警告] 综合 AI 诊断失败: {str(e)}"
-
-    def get_multi_code_suggestion_stream(
-        self,
-        codes: List[str],
-        results: List[Any],
-        correlation: Any,
-        vehicle_info: str = "",
-        additional_info: str = "",
-        context: Optional[DiagnosticContext] = None,
-    ) -> Iterator[str]:
-        """获取多故障码综合 AI 建议（流式）"""
-        with self._provider_lock:
-            provider = self._provider
-        if not provider.is_available():
-            yield "[警告] AI 服务未启动"
-            return
-
-        # 如果提供了 context，从中提取参数
-        if context is not None:
-            codes = context.codes
-            results = context.results
-            correlation = context.correlation
-            vehicle_info = context.vehicle_info
-            additional_info = context.additional_info
-
-        kb_dicts = []
-        for r in results:
-            if r and hasattr(r, 'knowledge') and r.knowledge:
-                kb_dicts.append(r.knowledge)
-            elif r and isinstance(r, dict):
-                kb_dicts.append(r)
-            else:
-                kb_dicts.append(None)
-
-        prompt = self.templates.build_multi_diagnostic_prompt(
-            codes=codes,
-            results=kb_dicts,
-            correlation_summary=correlation.analysis_summary,
-            vehicle_info=vehicle_info,
-            additional_info=additional_info,
-        )
-
-        try:
-            yield from provider.generate_stream(prompt, AI_TEMPERATURE, AI_MAX_TOKENS)
-        except Exception as e:
-            yield f"[警告] 综合 AI 诊断失败: {str(e)}"
 
 
 # 便捷函数

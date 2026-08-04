@@ -9,7 +9,7 @@ import unittest
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, PROJECT_ROOT)
 
-from src.ui.markdown_renderer import md_to_html, md_to_plain_text
+from src.ui.markdown_renderer import md_to_html, md_to_plain_text, StreamMarkdownRenderer
 from src.ui.export_utils import (
     _parse_json_field, _parse_related_codes, _get_severity_label,
     export_as_text, export_as_html
@@ -305,6 +305,65 @@ class TestExportAsHtml(unittest.TestCase):
             knowledge = {"severity": severity}
             result = export_as_html(code="P0300", knowledge=knowledge)
             self.assertIn(expected_class, result, f"severity={severity} should have class {expected_class}")
+
+
+class TestStreamMarkdownRenderer(unittest.TestCase):
+    """StreamMarkdownRenderer 流式渲染测试（防止跨 token 粗体泄漏字面 **）"""
+
+    @staticmethod
+    def render_all(chunks):
+        r = StreamMarkdownRenderer()
+        out = "".join(r.append(c) for c in chunks)
+        return out + r.flush()
+
+    def test_whole_token(self):
+        out = self.render_all(["故障码 **P0A00** 需要检查"])
+        self.assertIn("<strong>P0A00</strong>", out)
+        self.assertNotIn("**", out)
+
+    def test_char_by_char(self):
+        out = self.render_all(list("故障码 **P0A00** 需要检查"))
+        self.assertNotIn("**", out)
+        self.assertIn("<strong>P0A00</strong>", out)
+
+    def test_word_by_word(self):
+        out = self.render_all("故障码 **P0A00** 需要检查".split(" "))
+        self.assertNotIn("**", out)
+        self.assertIn("<strong>P0A00</strong>", out)
+
+    def test_split_mid_bold(self):
+        out = self.render_all(["故障码 **P", "0A00** 需要检查"])
+        self.assertNotIn("**", out)
+        self.assertIn("<strong>P0A00</strong>", out)
+
+    def test_star_split_across_tokens(self):
+        out = self.render_all(["故障码 *", "*P0A00", "** 需要检查"])
+        self.assertNotIn("**", out)
+        self.assertIn("<strong>P0A00</strong>", out)
+
+    def test_multiple_bolds(self):
+        out = self.render_all(list("**A** 和 **B** 均需检查"))
+        self.assertNotIn("**", out)
+        self.assertEqual(out.count("<strong>"), 2)
+
+    def test_plain_single_star(self):
+        """字面单星不应被误判为粗体"""
+        out = self.render_all(list("使用 * 星号作为乘号"))
+        self.assertNotIn("<strong>", out)
+        self.assertIn("*", out)
+
+    def test_html_escape_in_chunks(self):
+        out = self.render_all(list("<b> 与 **粗体** 混合"))
+        self.assertNotIn("<b>", out)
+        self.assertNotIn("**", out)
+        self.assertIn("&lt;b&gt;", out)
+
+    def test_flush_drops_unclosed(self):
+        r = StreamMarkdownRenderer()
+        out = r.append("text **unclosed")
+        out += r.flush()
+        self.assertNotIn("**", out)
+        self.assertNotIn("<strong>", out)
 
 
 if __name__ == "__main__":

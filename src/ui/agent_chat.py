@@ -15,7 +15,7 @@ from PyQt6.QtGui import QTextCursor
 
 from src.engine.diagnostic import DiagnosticEngine, DiagnosticResult
 from src.ai.agent import DiagnosticAgent
-from src.ui.markdown_renderer import md_to_html
+from src.ui.markdown_renderer import md_to_html, StreamMarkdownRenderer
 from src.ui.styles import PRIMARY, PRIMARY_DARK, PRIMARY_BG, CARD_BORDER, CARD_BG, TEXT_PRIMARY, TEXT_SECONDARY, TEXT_MUTED, BG, WARNING, WARNING_BG
 
 
@@ -293,37 +293,13 @@ class AgentChatPanel(QWidget):
     def _start_stream_message(self):
         """开始流式消息"""
         self._stream_content = ""
-        self._pending_bold_buf = ""  # 跨 token 粗体缓冲区
+        self._stream_renderer = StreamMarkdownRenderer()
 
     def _append_stream_token(self, token: str):
         """追加流式 token 到当前消息（支持跨 token 的 **粗体** 标记）"""
         self._stream_content += token
 
-        # 如果有未闭合的粗体缓冲，先拼接
-        work = self._pending_bold_buf + token
-        self._pending_bold_buf = ""
-
-        # 按 ** 分割，奇数段需要加粗
-        parts = work.split("**")
-
-        # 如果 parts 长度为偶数，说明最后一个是未闭合的（缺少右 **）
-        # 需要缓冲到下一个 token
-        if len(parts) % 2 == 0:
-            # 最后一段缺少右 **，缓冲起来
-            self._pending_bold_buf = parts[-1]
-            parts = parts[:-1]
-
-        html_parts = []
-        for i, part in enumerate(parts):
-            escaped = html_mod.escape(part)
-            escaped = escaped.replace('\n', '<br>')
-            if i % 2 == 1:
-                # 奇数段 → 粗体
-                html_parts.append(f"<strong>{escaped}</strong>")
-            else:
-                html_parts.append(escaped)
-
-        rendered = "".join(html_parts)
+        rendered = self._stream_renderer.append(token)
         if not rendered:
             return
 
@@ -339,7 +315,6 @@ class AgentChatPanel(QWidget):
 
         # 将流式内容记录到消息列表
         self._messages.append(("assistant", self._stream_content))
-        self._pending_bold_buf = ""
 
         # 删除流式阶段的原始文本（选中最后一条消息区域并替换）
         # 简单方案：重建整个显示

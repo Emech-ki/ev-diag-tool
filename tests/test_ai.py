@@ -396,5 +396,156 @@ class TestDiagnosticTools(unittest.TestCase):
             self.assertIn("properties", func["parameters"])
 
 
+class TestAgentReAct(unittest.TestCase):
+    """DiagnosticAgent.run() 主循环测试（Mock LLM，不发起真实网络请求）"""
+
+    @staticmethod
+    def _make_mock_llm(responses, is_local=False):
+        """构造一个按顺序返回 chat_with_tools 响应的 Mock LLM"""
+        llm = MagicMock()
+        llm.is_local = is_local
+        llm.chat_with_tools.side_effect = responses
+        llm.chat.return_value = "mock 总结回答"
+        return llm
+
+    def test_direct_answer_no_tools(self):
+        """LLM 直接给出文本回答 → run() 返回该回答"""
+        from src.ai.agent import DiagnosticAgent
+
+        llm = self._make_mock_llm([{"content": "直接回答", "tool_calls": None}])
+        agent = DiagnosticAgent(kb=None, llm=llm)
+        result = agent.run("P0300 是什么")
+        self.assertEqual(result, "直接回答")
+        self.assertEqual(len(agent._history), 2)
+
+    def test_react_loop_tool_then_answer(self):
+        """ReAct：第一轮调用工具，第二轮给出最终回答"""
+        from src.ai.agent import DiagnosticAgent
+
+        first = {
+            "content": "让我查询",
+            "tool_calls": [{
+                "id": "call_1",
+                "type": "function",
+                "function": {"name": "lookup_code", "arguments": '{"code": "P0300"}'},
+            }],
+        }
+        second = {"content": "P0300 是失火", "tool_calls": None}
+        llm = self._make_mock_llm([first, second])
+        agent = DiagnosticAgent(kb=None, llm=llm)
+
+        calls = []
+        results = []
+        result = agent.run(
+            "查 P0300",
+            on_tool_call=lambda n, a: calls.append((n, a)),
+            on_tool_result=lambda n, r: results.append((n, r)),
+        )
+
+        self.assertEqual(result, "P0300 是失火")
+        self.assertEqual(calls, [("lookup_code", {"code": "P0300"})])
+        self.assertEqual(len(results), 1)
+        # 历史应包含 user + assistant
+        self.assertEqual([h["role"] for h in agent._history], ["user", "assistant"])
+        # chat_with_tools 应被调用两次（首轮测试 + 下一轮）
+        self.assertEqual(llm.chat_with_tools.call_count, 2)
+
+    def test_react_loop_ollama_strips_tool_calls(self):
+        """Ollama（is_local=True）时，assistant 消息不应携带 tool_calls 字段"""
+        from src.ai.agent import DiagnosticAgent
+
+        first = {
+            "content": "查一下",
+            "tool_calls": [{
+                "id": "c1", "type": "function",
+                "function": {"name": "lookup_code", "arguments": '{"code": "P0300"}'},
+            }],
+        }
+        second = {"content": "结论", "tool_calls": None}
+        llm = self._make_mock_llm([first, second], is_local=True)
+        agent = DiagnosticAgent(kb=None, llm=llm)
+
+        agent.run("查 P0300")
+
+        # 第二次调用（下一轮）的消息历史中，assistant 消息不能有 tool_calls
+        args = llm.chat_with_tools.call_args_list[1]
+        messages = args[0][0]
+        assistant_msgs = [m for m in messages if m["role"] == "assistant"]
+        self.assertTrue(assistant_msgs, "应存在 assistant 消息")
+        self.assertNotIn("tool_calls", assistant_msgs[-1])
+
+    def test_react_loop_openai_keeps_tool_calls(self):
+        """OpenAI（is_local=False）时，assistant 消息必须携带 tool_calls 字段"""
+        from src.ai.agent import DiagnosticAgent
+
+        first = {
+            "content": "查一下",
+            "tool_calls": [{
+                "id": "c1", "type": "function",
+                "function": {"name": "lookup_code", "arguments": '{"code": "P0300"}'},
+            }],
+        }
+        second = {"content": "结论", "tool_calls": None}
+        llm = self._make_mock_llm([first, second], is_local=False)
+        agent = DiagnosticAgent(kb=None, llm=llm)
+
+        agent.run("查 P0300")
+
+        args = llm.chat_with_tools.call_args_list[1]
+        messages = args[0][0]
+        assistant_msgs = [m for m in messages if m["role"] == "assistant"]
+        self.assertTrue(assistant_msgs, "应存在 assistant 消息")
+        self.assertIn("tool_calls", assistant_msgs[-1])
+
+    def test_react_loop_dedup_tools(self):
+        """相同工具+参数不应重复调用（去重后强制总结）"""
+        from src.ai.agent import DiagnosticAgent
+
+        tool_call = {
+            "id": "c1", "type": "function",
+            "function": {"name": "lookup_code", "arguments": '{"code": "P0300"}'},
+        }
+        first = {"content": "查一下", "tool_calls": [tool_call]}
+        second = {"content": "再查一次", "tool_calls": [tool_call]}  # 重复调用
+        llm = self._make_mock_llm([first, second])
+        agent = DiagnosticAgent(kb=None, llm=llm)
+
+        # 第二轮重复 → any_new_call=False → 走 chat 总结
+        result = agent.run("查 P0300")
+        self.assertEqual(result, "mock 总结回答")
+        self.assertGreaterEqual(llm.chat.call_count, 1)
+
+    def test_react_loop_max_rounds_summary(self):
+        """循环次数用尽后走 chat 总结"""
+        from src.ai.agent import DiagnosticAgent
+
+        tool_call = {
+            "id": "c1", "type": "function",
+            "function": {"name": "lookup_code", "arguments": '{"code": "P0300"}'},
+        }
+        responses = []
+        for i in range(12):  # 超过 MAX_TOOL_ROUNDS=10
+            responses.append({"content": f"查询{i}", "tool_calls": [tool_call]})
+        llm = self._make_mock_llm(responses)
+        agent = DiagnosticAgent(kb=None, llm=llm)
+
+        result = agent.run("查 P0300")
+        self.assertEqual(result, "mock 总结回答")
+
+    def test_tool_calling_fails_falls_back_to_prefetch(self):
+        """chat_with_tools 抛异常 → 降级到 _run_with_prefetch"""
+        from src.ai.agent import DiagnosticAgent
+
+        llm = MagicMock()
+        llm.is_local = False
+        llm.chat_with_tools.side_effect = RuntimeError("tool calling not supported")
+        llm.chat.return_value = "降级回答"
+        agent = DiagnosticAgent(kb=None, llm=llm)
+
+        result = agent.run("查 P0300 是什么问题")
+        self.assertEqual(result, "降级回答")
+        llm.chat.assert_called_once()
+
+
 if __name__ == "__main__":
     unittest.main()
