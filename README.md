@@ -11,7 +11,7 @@
 | 指标 | 数值 |
 |------|------|
 | **版本** | v3.4.2 |
-| **测试** | 167 个全部通过 |
+| **测试** | 184 个全部通过 |
 | **故障码** | 8729 条（100% 中文） |
 | **详细信息覆盖** | 100%（8729 条） |
 | **车型数据** | 45 款 / 18 品牌 |
@@ -83,7 +83,7 @@ python src/main.py
 ```bash
 python scripts/seed_db.py    # 初始化数据库（含新能源码+车型数据）
 python src/main.py           # 运行程序
-pytest tests/                # 运行测试（167个测试）
+pytest tests/                # 运行测试（184个测试）
 ```
 
 ### 打包成 exe
@@ -208,7 +208,7 @@ pyinstaller EV-Diag-Tool.spec --noconfirm
 | **多 Agent 协作** | 专家路由系统（BMS/电机/热管理/通用） |
 | **多故障码分析** | 自动识别多个故障码，综合分析因果关系 |
 | **深色模式** | 主题切换，持久化到 .env |
-| **诊断结果导出** | 支持 txt/html 格式 |
+| **诊断结果导出** | 支持 txt/html/pdf 格式（PDF 用 reportlab） |
 | **诊断历史** | 记录历史诊断，支持搜索和导出 |
 | **批量数据增强** | AI 批量生成故障码详细诊断信息 |
 
@@ -266,7 +266,7 @@ ev-diag-tool/
 │   │   ├── result_panel.py   # 结果展示面板
 │   │   ├── agent_chat.py     # AI Agent对话面板
 │   │   ├── history_panel.py  # 诊断历史面板
-│   │   ├── export_utils.py   # 诊断结果导出
+│   │   ├── export_utils.py   # 诊断结果导出（txt/html/pdf）
 │   │   ├── markdown_renderer.py # Markdown渲染器
 │   │   ├── theme_helper.py   # 主题辅助模块
 │   │   ├── styles/           # 设计令牌（深色/浅色主题）
@@ -290,7 +290,7 @@ ev-diag-tool/
 │   ├── batch_enhance_codes.py # 批量增强脚本
 │   └── ...
 │
-└── tests/                    # 单元测试（167个）
+└── tests/                    # 单元测试（184个）
     ├── test_database.py
     ├── test_engine.py
     ├── test_ai.py
@@ -319,11 +319,12 @@ ev-diag-tool/
 |---|--------|------|
 | 1 | 清理死代码：`diagnose_multi`/`MultiCodeResult`/`CorrelationAnalyzer`/`CorrelationResult`/`export_multi_as_text`/`export_multi_as_html`/`get_multi_code_suggestion`/`DiagnosticContext`（均无调用点） | `diagnostic.py`, `correlation.py`(删), `export_utils.py`, `llm_client.py`, `context.py`(删) |
 | 2 | 流式粗体跨 token 泄漏字面 `**`（逐字符/分段到达时）→ 新增 `StreamMarkdownRenderer` 状态机，粗体内容延迟到闭合后渲染 | `markdown_renderer.py`, `agent_chat.py` |
-| 3 | GitHub Actions CI（Python 3.10/3.11/3.12 + pytest） | `.github/workflows/ci.yml` |
+| 3 | GitHub Actions CI（Python 3.10/3.11/3.12 + pytest + 覆盖率门限 30%） | `.github/workflows/ci.yml` |
 | 4 | 数据覆盖 98.2% → 100%（8729 条全部有详情） | 文档同步 |
 | 5 | 补 ReAct 主循环测试（直接回答/工具循环/Ollama 剥离/OpenAI 保留/去重/超限/降级） | `test_ai.py` |
 | 6 | 更新打包 spec：移除已删模块 hiddenimports、exe 名 → v3.4.2 | `EV-Diag-Tool.spec` |
-| 7 | 测试总数 151 → 167 | `test_export_and_markdown.py`, `test_ai.py` |
+| 7 | 测试总数 151 → 184（新增流式 provider 测试、verify_features 流式端到端、PDF 导出测试） | `test_export_and_markdown.py`, `test_ai.py`, `test_providers.py`, `verify_features.py` |
+| 8 | PDF 诊断报告导出（reportlab，中文字体自动回退），UI 导出对话框新增 PDF 选项 | `export_utils.py`, `main_window.py`, `EV-Diag-Tool.spec` |
 
 ### v3.4.2 — 安全与健壮性修复（2026-08-04）
 

@@ -368,3 +368,195 @@ def export_as_html(
 </html>"""
 
 
+def export_as_pdf(
+    code: str,
+    knowledge: Optional[Dict[str, Any]] = None,
+    ai_suggestion: Optional[str] = None,
+    vehicle_info: str = "",
+    symptoms: str = "",
+    timestamp: str = "",
+) -> bytes:
+    """
+    生成 PDF 诊断报告（reportlab，中文字体自动回退系统常见字体）
+
+    Returns:
+        PDF 二进制内容
+    """
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.units import mm
+    from reportlab.lib.enums import TA_CENTER
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, HRFlowable
+    from reportlab.lib import colors
+    from reportlab.pdfbase import pdfmetrics
+    from reportlab.pdfbase.ttfonts import TTFont
+    from reportlab.pdfbase.pdfmetrics import registerFontFamily
+
+    import io
+    import os
+
+    # 中文字体：按常见性回退（Windows / macOS / Linux）
+    _CJK_FONT = None
+    candidates = [
+        ("msyh", "C:/Windows/Fonts/msyh.ttc"),
+        ("simhei", "C:/Windows/Fonts/simhei.ttf"),
+        ("simsun", "C:/Windows/Fonts/simsun.ttc"),
+        ("pingfang", "/System/Library/Fonts/PingFang.ttc"),
+        ("noto", "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"),
+        ("wenquanyi", "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc"),
+    ]
+    for name, path in candidates:
+        if os.path.exists(path):
+            try:
+                pdfmetrics.registerFont(TTFont(name, path))
+                _CJK_FONT = name
+                break
+            except Exception:
+                continue
+    if _CJK_FONT is None:
+        _CJK_FONT = "Helvetica"
+
+    registerFontFamily(
+        _CJK_FONT,
+        normal=_CJK_FONT,
+        bold=_CJK_FONT,
+        italic=_CJK_FONT,
+        boldItalic=_CJK_FONT,
+    )
+
+    styles = getSampleStyleSheet()
+    body_style = ParagraphStyle(
+        "Body",
+        parent=styles["Normal"],
+        fontName=_CJK_FONT,
+        fontSize=10,
+        leading=15,
+        wordWrap="CJK",
+    )
+    h1_style = ParagraphStyle(
+        "H1CJK",
+        parent=styles["Title"],
+        fontName=_CJK_FONT,
+        fontSize=18,
+        leading=24,
+        textColor=colors.HexColor("#1565C0"),
+        spaceAfter=6,
+    )
+    h2_style = ParagraphStyle(
+        "H2CJK",
+        parent=styles["Heading2"],
+        fontName=_CJK_FONT,
+        fontSize=13,
+        leading=18,
+        textColor=colors.HexColor("#333333"),
+        spaceBefore=10,
+        spaceAfter=4,
+    )
+    small_style = ParagraphStyle(
+        "Small",
+        parent=styles["Normal"],
+        fontName=_CJK_FONT,
+        fontSize=8,
+        leading=11,
+        textColor=colors.HexColor("#888888"),
+        alignment=TA_CENTER,
+    )
+
+    def esc(text: str) -> str:
+        """reportlab Paragraph 使用 XML 转义"""
+        return str(text).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buf,
+        pagesize=A4,
+        leftMargin=18 * mm,
+        rightMargin=18 * mm,
+        topMargin=18 * mm,
+        bottomMargin=18 * mm,
+        title=f"诊断报告 - {code}",
+        author="EV-Diag-Tool",
+    )
+    story = []
+
+    # 标题 + 分隔线
+    story.append(Paragraph("EV-Diag-Tool 诊断报告", h1_style))
+    story.append(HRFlowable(width="100%", thickness=1.2, color=colors.HexColor("#1565C0")))
+
+    # 元信息表
+    meta = [("故障码", code)]
+    if knowledge:
+        severity = knowledge.get("severity", "")
+        if severity:
+            meta.append(("严重程度", _get_severity_label(severity)))
+        system = knowledge.get("system", "")
+        if system:
+            meta.append(("系统", system))
+    if vehicle_info:
+        meta.append(("车型", vehicle_info))
+    if symptoms:
+        meta.append(("症状描述", symptoms))
+    if timestamp:
+        meta.append(("诊断时间", timestamp))
+
+    meta_rows = [[Paragraph(esc(k), ParagraphStyle(
+        "MetaLabel", parent=body_style, fontName=_CJK_FONT, textColor=colors.HexColor("#555555"),
+        fontSize=9, leading=13, alignment=TA_CENTER,
+    )), Paragraph(esc(v), body_style)] for k, v in meta]
+    if meta_rows:
+        meta_table = Table(meta_rows, colWidths=[28 * mm, None])
+        meta_table.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (0, -1), colors.HexColor("#F5F5F5")),
+            ("BOX", (0, 0), (-1, -1), 0.5, colors.HexColor("#E0E0E0")),
+            ("INNERGRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#E0E0E0")),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ]))
+        story.append(Spacer(1, 4))
+        story.append(meta_table)
+        story.append(Spacer(1, 8))
+
+    # 知识库部分
+    if knowledge:
+        description = knowledge.get("description", "")
+        detail = knowledge.get("detail", "")
+        causes = _parse_json_field(knowledge.get("common_causes", []))
+        steps = _parse_json_field(knowledge.get("diagnostic_steps", []))
+        related = _parse_related_codes(knowledge.get("related_codes", []))
+
+        if description:
+            story.append(Paragraph("故障描述", h2_style))
+            story.append(Paragraph(esc(description), body_style))
+        if detail:
+            story.append(Paragraph("详细说明", h2_style))
+            story.append(Paragraph(esc(detail), body_style))
+        if causes:
+            story.append(Paragraph("常见原因", h2_style))
+            for i, c in enumerate(causes, 1):
+                story.append(Paragraph(f"{i}.&nbsp; {esc(c)}", body_style))
+        if steps:
+            story.append(Paragraph("诊断步骤", h2_style))
+            for i, s in enumerate(steps, 1):
+                story.append(Paragraph(f"{i}.&nbsp; {esc(s)}", body_style))
+        if related:
+            story.append(Paragraph("相关故障码", h2_style))
+            story.append(Paragraph(esc("  ".join(related)), body_style))
+
+    # AI 建议部分
+    if ai_suggestion:
+        story.append(Paragraph("AI 建议（仅供参考）", h2_style))
+        plain = md_to_plain_text(ai_suggestion)
+        for line in plain.split("\n"):
+            line = line.strip()
+            if not line:
+                continue
+            story.append(Paragraph(esc(line), body_style))
+
+    story.append(Spacer(1, 16))
+    story.append(HRFlowable(width="100%", thickness=0.5, color=colors.HexColor("#CCCCCC")))
+    story.append(Spacer(1, 6))
+    story.append(Paragraph("本报告由 EV-Diag-Tool 生成 | AI 建议仅供参考，请结合实际情况判断", small_style))
+
+    doc.build(story)
+    return buf.getvalue()
+
+

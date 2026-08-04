@@ -17,6 +17,10 @@ __pycache__/
 *.swp
 *.swo
 
+# Coverage
+.coverage
+htmlcov/
+
 # OS
 Thumbs.db
 .DS_Store

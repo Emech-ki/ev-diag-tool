@@ -1081,7 +1081,7 @@ class MainWindow(QMainWindow):
     def _export_current_result(self):
         """导出当前诊断结果"""
         from PyQt6.QtWidgets import QFileDialog
-        from src.ui.export_utils import export_as_text, export_as_html
+        from src.ui.export_utils import export_as_text, export_as_html, export_as_pdf
 
         result = self.result_panel.get_current_result()
         if not result:
@@ -1098,15 +1098,29 @@ class MainWindow(QMainWindow):
         file_path, selected_filter = QFileDialog.getSaveFileName(
             self, "导出诊断报告",
             default_name,
-            "文本文件 (*.txt);;HTML 文件 (*.html)"
+            "PDF 文件 (*.pdf);;文本文件 (*.txt);;HTML 文件 (*.html)"
         )
         if not file_path:
             return
 
         try:
-            is_html = "HTML" in selected_filter or file_path.endswith(".html")
-            if is_html:
-                if not file_path.endswith(".html"):
+            is_pdf = "PDF" in selected_filter or file_path.lower().endswith(".pdf")
+            is_html = "HTML" in selected_filter or file_path.lower().endswith(".html")
+            if is_pdf:
+                if not file_path.lower().endswith(".pdf"):
+                    file_path += ".pdf"
+                content = export_as_pdf(
+                    code=result.code,
+                    knowledge=result.knowledge,
+                    ai_suggestion=result.ai_suggestion,
+                    vehicle_info=vehicle,
+                    symptoms=symptom,
+                    timestamp=result.timestamp,
+                )
+                with open(file_path, "wb") as f:
+                    f.write(content)
+            elif is_html:
+                if not file_path.lower().endswith(".html"):
                     file_path += ".html"
                 content = export_as_html(
                     code=result.code,
@@ -1116,8 +1130,10 @@ class MainWindow(QMainWindow):
                     symptoms=symptom,
                     timestamp=result.timestamp,
                 )
+                with open(file_path, "w", encoding="utf-8") as f:
+                    f.write(content)
             else:
-                if not file_path.endswith(".txt"):
+                if not file_path.lower().endswith(".txt"):
                     file_path += ".txt"
                 content = export_as_text(
                     code=result.code,
@@ -1127,9 +1143,8 @@ class MainWindow(QMainWindow):
                     symptoms=symptom,
                     timestamp=result.timestamp,
                 )
-
-            with open(file_path, "w", encoding="utf-8") as f:
-                f.write(content)
+                with open(file_path, "w", encoding="utf-8") as f:
+                    f.write(content)
 
             self.status_bar.showMessage(f"诊断报告已导出: {file_path}")
         except Exception as e:
@@ -1138,7 +1153,7 @@ class MainWindow(QMainWindow):
     def _export_history_record(self, record: dict):
         """导出历史记录的诊断报告"""
         from PyQt6.QtWidgets import QFileDialog
-        from src.ui.export_utils import export_as_text, export_as_html
+        from src.ui.export_utils import export_as_text, export_as_html, export_as_pdf
 
         code = record.get("code", "")
         if not code:
@@ -1164,15 +1179,27 @@ class MainWindow(QMainWindow):
         file_path, selected_filter = QFileDialog.getSaveFileName(
             self, "导出诊断报告",
             default_name,
-            "文本文件 (*.txt);;HTML 文件 (*.html)"
+            "PDF 文件 (*.pdf);;文本文件 (*.txt);;HTML 文件 (*.html)"
         )
         if not file_path:
             return
 
         try:
-            is_html = "HTML" in selected_filter or file_path.endswith(".html")
-            if is_html:
-                if not file_path.endswith(".html"):
+            is_pdf = "PDF" in selected_filter or file_path.lower().endswith(".pdf")
+            is_html = "HTML" in selected_filter or file_path.lower().endswith(".html")
+            if is_pdf:
+                if not file_path.lower().endswith(".pdf"):
+                    file_path += ".pdf"
+                content = export_as_pdf(
+                    code=code, knowledge=knowledge,
+                    ai_suggestion=ai_suggestion or None,
+                    vehicle_info=vehicle_info, symptoms=symptoms,
+                    timestamp=timestamp,
+                )
+                with open(file_path, "wb") as f:
+                    f.write(content)
+            elif is_html:
+                if not file_path.lower().endswith(".html"):
                     file_path += ".html"
                 content = export_as_html(
                     code=code, knowledge=knowledge,
@@ -1180,8 +1207,10 @@ class MainWindow(QMainWindow):
                     vehicle_info=vehicle_info, symptoms=symptoms,
                     timestamp=timestamp,
                 )
+                with open(file_path, "w", encoding="utf-8") as f:
+                    f.write(content)
             else:
-                if not file_path.endswith(".txt"):
+                if not file_path.lower().endswith(".txt"):
                     file_path += ".txt"
                 content = export_as_text(
                     code=code, knowledge=knowledge,
@@ -1189,9 +1218,8 @@ class MainWindow(QMainWindow):
                     vehicle_info=vehicle_info, symptoms=symptoms,
                     timestamp=timestamp,
                 )
-
-            with open(file_path, "w", encoding="utf-8") as f:
-                f.write(content)
+                with open(file_path, "w", encoding="utf-8") as f:
+                    f.write(content)
 
             self.status_bar.showMessage(f"诊断报告已导出: {file_path}")
         except Exception as e:

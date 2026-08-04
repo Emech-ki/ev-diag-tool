@@ -14,7 +14,7 @@ src/
 │   ├── result_panel.py  # 单/多码诊断结果展示
 │   ├── agent_chat.py    # AI Agent 对话面板
 │   ├── history_panel.py # 诊断历史
-│   ├── export_utils.py  # 报告导出（txt/html）
+│   ├── export_utils.py  # 报告导出（txt/html/pdf，PDF 用 reportlab）
 │   ├── markdown_renderer.py  # Markdown→HTML（含跨 token 粗体缓冲）
 │   └── styles/          # 主题令牌（深色/浅色）
 ├── database/
@@ -35,7 +35,9 @@ src/
 ```bash
 python scripts/seed_db.py    # 初始化数据库（8729 码 + 45 车型）
 python src/main.py           # 运行程序
-pytest tests/                # 167 个测试
+pytest tests/                # 184 个测试
+pytest tests/ --cov=src --cov-report=term-missing  # 覆盖率（基线约 36%，逻辑层 58%+）
+python scripts/verify_features.py   # 端到端验证（需 Ollama 在线，45 项）
 ```
 
 ## 核心架构要点
@@ -68,7 +70,7 @@ pytest tests/                # 167 个测试
 ## 当前状态
 
 - **版本**：v3.4.2（Security & Robustness Fixes）
-- **测试**：167 个全部通过
+- **测试**：184 个全部通过（含 export_as_pdf 4 个）
 - **数据库**：8729 故障码（100% 有详情）+ 45 车型
 - **AI 配置**：`.env` 指向本地 Ollama `qwen2.5:7b`
 - **打包**：`pyinstaller EV-Diag-Tool.spec --noconfirm`（spec 内改 name 为当前版本号）

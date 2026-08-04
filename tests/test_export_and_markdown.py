@@ -12,7 +12,7 @@ sys.path.insert(0, PROJECT_ROOT)
 from src.ui.markdown_renderer import md_to_html, md_to_plain_text, StreamMarkdownRenderer
 from src.ui.export_utils import (
     _parse_json_field, _parse_related_codes, _get_severity_label,
-    export_as_text, export_as_html
+    export_as_text, export_as_html, export_as_pdf
 )
 
 
@@ -364,6 +364,63 @@ class TestStreamMarkdownRenderer(unittest.TestCase):
         out += r.flush()
         self.assertNotIn("**", out)
         self.assertNotIn("<strong>", out)
+
+
+class TestExportAsPdf(unittest.TestCase):
+    """export_as_pdf 测试（reportlab）"""
+
+    @classmethod
+    def setUpClass(cls):
+        try:
+            import reportlab  # noqa: F401
+            cls.skip = False
+        except ImportError:
+            cls.skip = True
+
+    def _pdf_bytes(self, **kwargs):
+        kwargs.setdefault("code", "P0300")
+        return export_as_pdf(**kwargs)
+
+    def test_basic_export(self):
+        if self.skip:
+            self.skipTest("reportlab 未安装")
+        data = self._pdf_bytes()
+        self.assertTrue(data.startswith(b"%PDF-"), "PDF 魔数缺失")
+        self.assertGreater(len(data), 1000)
+
+    def test_with_knowledge_and_ai(self):
+        if self.skip:
+            self.skipTest("reportlab 未安装")
+        knowledge = {
+            "description": "随机/多缸失火",
+            "severity": "high",
+            "system": "动力总成",
+            "detail": "ECU检测到多个气缸失火",
+            "common_causes": '["火花塞故障", "点火线圈故障"]',
+            "diagnostic_steps": '["检查火花塞"]',
+            "related_codes": ["P0171", "P0301"],
+        }
+        data = self._pdf_bytes(
+            knowledge=knowledge,
+            ai_suggestion="**建议**：检查点火线圈",
+            vehicle_info="比亚迪汉EV",
+            symptoms="冷车启动抖动",
+            timestamp="2026-01-01 10:00:00",
+        )
+        self.assertTrue(data.startswith(b"%PDF-"))
+        self.assertGreater(len(data), 2000)
+
+    def test_empty_knowledge(self):
+        if self.skip:
+            self.skipTest("reportlab 未安装")
+        data = self._pdf_bytes(code="P0171", ai_suggestion=None)
+        self.assertTrue(data.startswith(b"%PDF-"))
+
+    def test_ai_suggestion_newlines(self):
+        if self.skip:
+            self.skipTest("reportlab 未安装")
+        data = self._pdf_bytes(ai_suggestion="第一行\n\n第二行\n- 列表项")
+        self.assertTrue(data.startswith(b"%PDF-"))
 
 
 if __name__ == "__main__":
