@@ -390,14 +390,14 @@ def test_agent_build_messages():
 def test_agent_prefetch():
     """测试降级模式的预查询"""
     agent = DiagnosticAgent(kb=kb)
-    data = agent._prefetch_tools("P0300 故障码怎么修")
+    data = agent._prefetch_knowledge_for_message("P0300 故障码怎么修")
     assert "P0300" in data, f"预查询未包含 P0300: {data[:200]}"
     return True
 
 def test_agent_prefetch_symptom():
     """测试症状关键词预查询"""
     agent = DiagnosticAgent(kb=kb)
-    data = agent._prefetch_tools("冷车启动抖动怎么办")
+    data = agent._prefetch_knowledge_for_message("冷车启动抖动怎么办")
     assert "缺火" in data or "search_by_symptom" in data, f"预查询未搜症状: {data[:200]}"
     return True
 
@@ -412,6 +412,60 @@ def test_agent_run():
     assert len(result) > 10, f"回复太短: {result}"
     return True
 
+def test_agent_run_stream():
+    """测试 Agent.run_stream() 流式完整调用（需要 LLM 可用）"""
+    from src.ai.providers import StreamEvent
+
+    agent = DiagnosticAgent(kb=kb)
+    LLMClient._instance = None
+    llm = LLMClient()
+    if not llm.is_available():
+        return "LLM 不可用，跳过 run_stream() 测试"
+
+    events = []
+    tool_calls_seen = []
+    for ev in agent.run_stream(
+        "P0300 是什么故障？",
+        on_tool_call=lambda name, args: tool_calls_seen.append(name),
+    ):
+        events.append(ev)
+
+    types = [e.type for e in events]
+    assert "done" in types, f"缺少 done 事件: {types}"
+    content = "".join(e.content for e in events if e.type == "content")
+    assert len(content) > 5, f"流式内容过短: {content[:200]}"
+    return True
+
+def test_llm_diagnostic_suggestion_stream():
+    """测试 LLMClient.get_diagnostic_suggestion_stream() 真实流式（需要 LLM 可用）"""
+    LLMClient._instance = None
+    llm = LLMClient()
+    if not llm.is_available():
+        return "LLM 不可用，跳过流式诊断测试"
+
+    tokens = list(llm.get_diagnostic_suggestion_stream(code="P0300"))
+    text = "".join(tokens)
+    assert len(text) > 5, f"流式诊断内容过短: {text[:200]}"
+    return True
+
+def test_provider_chat_with_tools_stream():
+    """测试 Provider.chat_with_tools_stream() 真实流式工具调用（需要 LLM 可用）"""
+    LLMClient._instance = None
+    llm = LLMClient()
+    if not llm.is_available():
+        return "LLM 不可用，跳过工具流式测试"
+
+    from src.ai.agent import DiagnosticAgent
+    agent = DiagnosticAgent(kb=kb)
+    messages = agent._build_messages("帮我查一下 P0300")
+    events = list(llm.provider.chat_with_tools_stream(
+        messages, agent.tools.to_openai_format()
+    ))
+    types = [e.type for e in events]
+    assert events[-1].type == "done", f"最后事件应为 done: {types}"
+    # 只要流式能走完且无异常即为通过（模型可能直接回答或调用工具）
+    return True
+
 
 test("Agent 初始化", test_agent_init)
 test("Agent 开始诊断", test_agent_start_diagnosis)
@@ -421,6 +475,9 @@ test("Agent 消息构建", test_agent_build_messages)
 test("Agent 预查询（故障码）", test_agent_prefetch)
 test("Agent 预查询（症状）", test_agent_prefetch_symptom)
 test("Agent.run() 完整调用", test_agent_run)
+test("Agent.run_stream() 流式调用", test_agent_run_stream)
+test("LLM 流式诊断建议", test_llm_diagnostic_suggestion_stream)
+test("Provider 流式工具调用", test_provider_chat_with_tools_stream)
 
 
 # ═══════════════════════════════════════════════════════════
