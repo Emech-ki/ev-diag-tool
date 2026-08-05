@@ -8,7 +8,7 @@
 src/
 ├── main.py              # 程序入口
 ├── config.py            # .env 配置读取 + 多端点管理（模块级常量 import 时缓存）
-├── version.py           # 版本号（v3.4.2）
+├── version.py           # 版本号（v3.4.3）
 ├── ui/                  # PyQt6 界面层
 │   ├── main_window.py   # 主窗口（含 QThread worker 定义）
 │   ├── result_panel.py  # 单/多码诊断结果展示
@@ -35,8 +35,8 @@ src/
 ```bash
 python scripts/seed_db.py    # 初始化数据库（8729 码 + 45 车型）
 python src/main.py           # 运行程序
-pytest tests/                # 184 个测试
-pytest tests/ --cov=src --cov-report=term-missing  # 覆盖率（基线约 36%，逻辑层 58%+）
+pytest tests/                # 493 个测试
+pytest tests/ --cov=src --cov-report=term-missing  # 覆盖率 75%（逻辑层 85%+）
 python scripts/verify_features.py   # 端到端验证（需 Ollama 在线，45 项）
 ```
 
@@ -69,8 +69,8 @@ python scripts/verify_features.py   # 端到端验证（需 Ollama 在线，45 �
 
 ## 当前状态
 
-- **版本**：v3.4.2（Security & Robustness Fixes）
-- **测试**：184 个全部通过（含 export_as_pdf 4 个）
+- **版本**：v3.4.3（EV 码知识库扩充）
+- **测试**：493 个全部通过（含 UI 测试、export_as_pdf 4 个）
 - **数据库**：8729 故障码（100% 有详情）+ 45 车型
 - **AI 配置**：`.env` 指向本地 Ollama `qwen2.5:7b`
 - **打包**：`pyinstaller EV-Diag-Tool.spec --noconfirm`（spec 内改 name 为当前版本号）

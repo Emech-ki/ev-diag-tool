@@ -10,8 +10,9 @@
 
 | 指标 | 数值 |
 |------|------|
-| **版本** | v3.4.2 |
-| **测试** | 184 个全部通过 |
+| **版本** | v3.4.3 |
+| **测试** | 493 个全部通过 |
+| **覆盖率** | 75%（逻辑层 85%+） |
 | **故障码** | 8729 条（100% 中文） |
 | **详细信息覆盖** | 100%（8729 条） |
 | **车型数据** | 45 款 / 18 品牌 |
@@ -83,7 +84,7 @@ python src/main.py
 ```bash
 python scripts/seed_db.py    # 初始化数据库（含新能源码+车型数据）
 python src/main.py           # 运行程序
-pytest tests/                # 运行测试（184个测试）
+pytest tests/                # 运行测试（493个测试）
 ```
 
 ### 打包成 exe
@@ -290,7 +291,7 @@ ev-diag-tool/
 │   ├── batch_enhance_codes.py # 批量增强脚本
 │   └── ...
 │
-└── tests/                    # 单元测试（184个）
+└── tests/                    # 单元测试（477个）
     ├── test_database.py
     ├── test_engine.py
     ├── test_ai.py
@@ -323,7 +324,7 @@ ev-diag-tool/
 | 4 | 数据覆盖 98.2% → 100%（8729 条全部有详情） | 文档同步 |
 | 5 | 补 ReAct 主循环测试（直接回答/工具循环/Ollama 剥离/OpenAI 保留/去重/超限/降级） | `test_ai.py` |
 | 6 | 更新打包 spec：移除已删模块 hiddenimports、exe 名 → v3.4.2 | `EV-Diag-Tool.spec` |
-| 7 | 测试总数 151 → 184（新增流式 provider 测试、verify_features 流式端到端、PDF 导出测试） | `test_export_and_markdown.py`, `test_ai.py`, `test_providers.py`, `verify_features.py` |
+| 7 | 测试总数 151 → 477（新增流式 provider 测试、verify_features 流式端到端、PDF 导出测试、UI 测试） | `test_export_and_markdown.py`, `test_ai.py`, `test_providers.py`, `verify_features.py`, `test_ui_*.py` |
 | 8 | PDF 诊断报告导出（reportlab，中文字体自动回退），UI 导出对话框新增 PDF 选项 | `export_utils.py`, `main_window.py`, `EV-Diag-Tool.spec` |
 
 ### v3.4.2 — 安全与健壮性修复（2026-08-04）
