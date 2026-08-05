@@ -321,3 +321,41 @@ class TestAgentChatToolResult:
         panel._append_message.assert_called_once_with(
             "system", "✅ lookup_code 查询完成"
         )
+
+
+# ── v3.4.3: parse_fault_codes 支持 EV 码 ──
+
+
+class TestParseFaultCodesEV:
+    """主诊断输入支持 EV-XXX-NNN 格式"""
+
+    def test_single_ev_code(self):
+        from src.engine.diagnostic import parse_fault_codes
+        assert parse_fault_codes("EV-BMS-001") == ["EV-BMS-001"]
+
+    def test_multi_ev_codes(self):
+        from src.engine.diagnostic import parse_fault_codes
+        assert parse_fault_codes("EV-BMS-001, EV-MOTOR-002") == [
+            "EV-BMS-001", "EV-MOTOR-002",
+        ]
+
+    def test_mixed_ev_and_standard(self):
+        from src.engine.diagnostic import parse_fault_codes
+        assert parse_fault_codes("EV-BMS-001 P0300") == ["EV-BMS-001", "P0300"]
+
+    def test_ev_code_lowercase(self):
+        from src.engine.diagnostic import parse_fault_codes
+        assert parse_fault_codes("ev-bms-001") == ["EV-BMS-001"]
+
+    def test_ev_code_deduplicated(self):
+        from src.engine.diagnostic import parse_fault_codes
+        assert parse_fault_codes("EV-BMS-001 ev-bms-001") == ["EV-BMS-001"]
+
+    def test_ev_code_embedded_in_text(self):
+        from src.engine.diagnostic import parse_fault_codes
+        assert parse_fault_codes("故障 EV-BMS-001 绝缘报警") == ["EV-BMS-001"]
+
+    def test_standard_code_not_broken(self):
+        from src.engine.diagnostic import parse_fault_codes
+        assert parse_fault_codes("P0A0F P0300 B001A") == ["P0A0F", "P0300", "B001A"]
+

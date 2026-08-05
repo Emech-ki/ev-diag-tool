@@ -64,9 +64,11 @@ def parse_fault_codes(input_text: str) -> List[str]:
     if not input_text:
         return []
 
-    # 使用正则表达式匹配故障码格式: 字母(P/B/C/U) + 4位（可能含十六进制字母，如 P0A00）
-    # 注意: 不能用 \d{4}，因为 EV 故障码后 4 位常含 A-F（如 P0A0F、B001A）
-    pattern = r'\b[PpBbCcUu][0-9A-Fa-f]{4}\b'
+    # 使用正则表达式匹配故障码格式:
+    #   - EV 系统码: EV-BMS-001（新能源系统，与 _split_history_codes 保持一致）
+    #   - 标准码: 字母(P/B/C/U) + 4位（可能含十六进制字母，如 P0A00、B001A）
+    # 注意: 标准码不能用 \d{4}，因为后 4 位常含 A-F（如 P0A0F、B001A）
+    pattern = r'(?:\b[Ee][Vv]-[A-Za-z]+-\d+\b|\b[PpBbCcUu][0-9A-Fa-f]{4}\b)'
     matches = re.findall(pattern, input_text)
 
     # 转大写、去重、保持顺序

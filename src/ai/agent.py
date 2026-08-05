@@ -703,9 +703,10 @@ class DiagnosticAgent:
                     desc = (kb_data.get("description") or "").lower()
 
                     # 按 system 字段路由
-                    if "EV-BMS" in system or "EV-HV" in system:
+                    if ("EV-BMS" in system or "EV-HV" in system
+                            or "EV-OBC" in system or "EV-DCDC" in system):
                         return "bms"
-                    if "EV-MOTOR" in system:
+                    if "EV-MOTOR" in system or "EV-REGEN" in system:
                         return "motor"
                     if "EV-THERMAL" in system:
                         return "thermal"

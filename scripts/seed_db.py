@@ -229,6 +229,7 @@ def main():
         ("C-codes (Chassis)", SEED_DIR / "c_codes.csv"),
         ("U-codes (Network)", SEED_DIR / "u_codes.csv"),
         ("EV-codes (New Energy)", SEED_DIR / "ev_codes.csv"),
+        ("EV System-codes (BMS/Motor/OBC etc.)", SEED_DIR / "ev_system_codes.csv"),
     ]
 
     total_count = 0
