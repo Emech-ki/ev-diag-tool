@@ -11,10 +11,10 @@
 | 指标 | 数值 |
 |------|------|
 | **版本** | v3.4.3 |
-| **测试** | 493 个全部通过 |
+| **测试** | 515 个全部通过 |
 | **覆盖率** | 75%（逻辑层 85%+） |
-| **故障码** | 8729 条（100% 中文） |
-| **详细信息覆盖** | 100%（8729 条） |
+| **故障码** | 8875 条（100% 中文） |
+| **详细信息覆盖** | 100%（8875 条） |
 | **车型数据** | 45 款 / 18 品牌 |
 
 ---
@@ -84,7 +84,7 @@ python src/main.py
 ```bash
 python scripts/seed_db.py    # 初始化数据库（含新能源码+车型数据）
 python src/main.py           # 运行程序
-pytest tests/                # 运行测试（493个测试）
+pytest tests/                # 运行测试（515个测试）
 ```
 
 ### 打包成 exe
@@ -92,7 +92,7 @@ pytest tests/                # 运行测试（493个测试）
 ```bash
 pip install pyinstaller
 pyinstaller EV-Diag-Tool.spec --noconfirm
-# 生成的 exe 在 dist/ 目录下（名称含版本号，如 EV-Diag-Tool_v3.4.2.exe）
+# 生成的 exe 在 dist/ 目录下（名称含版本号，如 EV-Diag-Tool_v3.4.3.exe）
 # 打包前请修改 EV-Diag-Tool.spec 中的 name 字段为当前版本
 ```
 
@@ -203,7 +203,7 @@ pyinstaller EV-Diag-Tool.spec --noconfirm
 
 | 功能 | 说明 |
 |------|------|
-| **故障码查询** | 支持 P/B/C/U 系列 8729 条故障码 |
+| **故障码查询** | 支持 P/B/C/U 系列 + EV 系统码，共 8875 条故障码 |
 | **AI 诊断建议** | 支持 Ollama 本地模型 + OpenAI 兼容 API |
 | **AI Agent 对话** | 流式 Tool Calling，对话式排查引导 |
 | **多 Agent 协作** | 专家路由系统（BMS/电机/热管理/通用） |
@@ -236,8 +236,9 @@ pyinstaller EV-Diag-Tool.spec --noconfirm
 | U-codes (网络通讯) | 1231 | 标准英文 + 中文详细 |
 | C-codes (底盘) | 525 | 标准英文 + 中文详细 |
 | B-codes (车身) | 360 | 标准英文 + 中文详细 |
-| EV-codes (新能源) | 60 | 中文详细 |
-| **合计** | **8729** | 100% 有详细诊断信息 |
+| EV-codes (新能源标准) | 60 | 中文详细（P0Axx 系列） |
+| EV System-codes (新能源系统) | 146 | 中文详细（BMS/电机/OBC/DC-DC/热管理/高压/再生制动） |
+| **合计** | **8875** | 100% 有详细诊断信息 |
 
 ---
 
@@ -291,7 +292,7 @@ ev-diag-tool/
 │   ├── batch_enhance_codes.py # 批量增强脚本
 │   └── ...
 │
-└── tests/                    # 单元测试（477个）
+└── tests/                    # 单元测试（515个）
     ├── test_database.py
     ├── test_engine.py
     ├── test_ai.py
@@ -313,6 +314,17 @@ ev-diag-tool/
 ---
 
 ## 版本历史
+
+### v3.4.3 — EV 码知识库扩充（2026-08-05）
+
+| # | 修复/新增项 | 文件 |
+|---|------|------|
+| 1 | 新增 146 条 EV 系统码（BMS 22 / MOTOR 22 / OBC 22 / DC-DC 20 / THERMAL 20 / HV 20 / REGEN 20），全部 AI 增强含中文详情，故障码总数 8729→8875 | `data/seed/ev_system_codes.csv`, `scripts/generate_ev_system_codes.py` |
+| 2 | `parse_fault_codes` 支持 `EV-XXX-NNN` 格式输入解析（与历史导出拆分一致），补 7 个回归测试 | `diagnostic.py`, `test_bug_fixes.py` |
+| 3 | 专家路由扩充：EV-OBC/EV-DCDC → BMS 专家，EV-REGEN → 电机专家（域名 + `_select_expert`） | `expert_context.json`, `agent.py` |
+| 4 | `seed_db.py` 接入 ev_system_codes.csv | `seed_db.py` |
+| 5 | 修复 5 个导出/症状区/死代码 bug（多码导出崩溃、历史导出 EV 码、症状区重置、死代码）+ 16 回归测试 | `main_window.py`, `result_panel.py`, `agent_chat.py`, `test_bug_fixes.py` |
+| 6 | 新增 EV 码数据完整性测试（CSV 格式/可导入/查询链路/专家路由） | `test_ev_codes.py` |
 
 ### v3.4.2 — 死代码清理 + 流式渲染修复 + CI（2026-08-04）
 

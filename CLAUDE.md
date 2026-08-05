@@ -33,9 +33,9 @@ src/
 ## 常用命令
 
 ```bash
-python scripts/seed_db.py    # 初始化数据库（8729 码 + 45 车型）
+python scripts/seed_db.py    # 初始化数据库（8875 码 + 45 车型）
 python src/main.py           # 运行程序
-pytest tests/                # 493 个测试
+pytest tests/                # 515 个测试
 pytest tests/ --cov=src --cov-report=term-missing  # 覆盖率 75%（逻辑层 85%+）
 python scripts/verify_features.py   # 端到端验证（需 Ollama 在线，45 项）
 ```
@@ -55,7 +55,7 @@ python scripts/verify_features.py   # 端到端验证（需 Ollama 在线，45 �
 - **HTML 转义**：所有用户/知识库数据插入 HTML 前必须 `html.escape()`（历史上有过 XSS 漏洞）
 - **流式渲染**：token 级处理需考虑跨 token 边界的 markdown 标记（`**粗体**` 用 `_pending_bold_buf` 缓冲）
 - **Provider 切换**：必须持有 `threading.Lock` 保护 `_provider` 赋值
-- **故障码格式**：P/B/C/U 后 4 位可含十六进制字母（`P0A00`、`B001A`），解析用 `[0-9A-Fa-f]{4}`，**不要**用 `\d{4}`
+- **故障码格式**：P/B/C/U 后 4 位可含十六进制字母（`P0A00`、`B001A`），解析用 `[0-9A-Fa-f]{4}`，**不要**用 `\d{4}`；另支持 EV 系统码 `EV-XXX-NNN`（如 `EV-BMS-001`），解析见 `parse_fault_codes`
 - **数据库**：所有 SQL 必须参数化（`?` 占位符）；并发写用 `_write_lock` 串行化
 
 ## 关键陷阱（踩过坑）
@@ -70,8 +70,8 @@ python scripts/verify_features.py   # 端到端验证（需 Ollama 在线，45 �
 ## 当前状态
 
 - **版本**：v3.4.3（EV 码知识库扩充）
-- **测试**：493 个全部通过（含 UI 测试、export_as_pdf 4 个）
-- **数据库**：8729 故障码（100% 有详情）+ 45 车型
+- **测试**：515 个全部通过（含 UI 测试、export_as_pdf 4 个）
+- **数据库**：8875 故障码（100% 有详情，含 146 条 EV 系统码）+ 45 车型
 - **AI 配置**：`.env` 指向本地 Ollama `qwen2.5:7b`
 - **打包**：`pyinstaller EV-Diag-Tool.spec --noconfirm`（spec 内改 name 为当前版本号）
 
