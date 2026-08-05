@@ -298,6 +298,7 @@ class TestDiagnosticEngine(unittest.TestCase):
         # 创建 mock LLM，避免实际调用 Ollama
         mock_llm = MagicMock()
         mock_llm.is_available.return_value = False
+        self.mock_llm = mock_llm
         self.engine = DiagnosticEngine(knowledge_base=self.kb, llm=mock_llm)
 
     def tearDown(self):
@@ -341,6 +342,89 @@ class TestDiagnosticEngine(unittest.TestCase):
         status = self.engine.check_database_status()
         self.assertTrue(status["exists"])
         self.assertGreater(status["total_codes"], 0)
+
+    # ── 单码 AI 路径 ──
+
+    def test_diagnose_ai_available(self):
+        """AI 可用时返回建议"""
+        self.mock_llm.is_available.return_value = True
+        self.mock_llm.get_diagnostic_suggestion.return_value = "AI 排查建议"
+        result = self.engine.diagnose("P0300")
+        self.assertTrue(result.has_ai())
+        self.assertEqual(result.ai_suggestion, "AI 排查建议")
+        self.assertTrue(result.ai_available)
+
+    def test_diagnose_ai_exception(self):
+        """AI 调用抛异常 → 降级为警告"""
+        self.mock_llm.is_available.return_value = True
+        self.mock_llm.get_diagnostic_suggestion.side_effect = RuntimeError("连接失败")
+        result = self.engine.diagnose("P0300")
+        self.assertFalse(result.ai_available)
+        self.assertIn("暂时不可用", result.ai_suggestion)
+
+    def test_diagnose_has_ai_false(self):
+        """无 AI 建议时 has_ai 返回 False"""
+        result = self.engine.diagnose("P0300")
+        self.assertFalse(result.has_ai())
+
+    def test_diagnose_has_ai_requires_suggestion(self):
+        """ai_available 为 True 但建议为 None 时 has_ai 为 False"""
+        result = self.engine.diagnose("P0300")
+        result.ai_available = True
+        self.assertFalse(result.has_ai())
+
+    # ── 多码诊断 ──
+
+    def test_diagnose_multiple_with_knowledge(self):
+        """多码诊断：两个码都有知识库结果"""
+        result = self.engine.diagnose_multiple(["P0300", "B1100"])
+        self.assertTrue(result.has_knowledge())
+        self.assertEqual(len(result.results), 2)
+        self.assertTrue(result.results[0].has_knowledge())
+        self.assertTrue(result.results[1].has_knowledge())
+
+    def test_diagnose_multiple_mixed_knowledge(self):
+        """多码诊断：部分码无知识库结果"""
+        result = self.engine.diagnose_multiple(["P0300", "P9999"])
+        self.assertTrue(result.results[0].has_knowledge())
+        self.assertFalse(result.results[1].has_knowledge())
+
+    def test_diagnose_multiple_ai_available(self):
+        """AI 可用时多码综合分析"""
+        self.mock_llm.is_available.return_value = True
+        self.mock_llm.get_multi_code_analysis.return_value = "综合建议"
+        result = self.engine.diagnose_multiple(["P0300", "B1100"])
+        self.assertTrue(result.has_ai())
+        self.assertEqual(result.ai_suggestion, "综合建议")
+        # knowledge_list 应只含库中存在的码
+        called = self.mock_llm.get_multi_code_analysis.call_args
+        knowledge_list = called[1]["knowledge_list"]
+        self.assertEqual(len(knowledge_list), 2)
+
+    def test_diagnose_multiple_ai_exception(self):
+        """AI 综合分析抛异常 → 降级"""
+        self.mock_llm.is_available.return_value = True
+        self.mock_llm.get_multi_code_analysis.side_effect = RuntimeError("boom")
+        result = self.engine.diagnose_multiple(["P0300"])
+        self.assertFalse(result.ai_available)
+        self.assertIn("暂时不可用", result.ai_suggestion)
+
+    def test_diagnose_multiple_has_ai_false(self):
+        """无 AI 建议时多码 has_ai 为 False"""
+        result = self.engine.diagnose_multiple(["P0300"])
+        self.assertFalse(result.has_ai())
+
+    def test_diagnose_multiple_code_uppercase(self):
+        """多码诊断自动转大写"""
+        result = self.engine.diagnose_multiple(["p0300"])
+        self.assertEqual(result.codes[0], "p0300")
+        self.assertEqual(result.results[0].code, "p0300")
+        self.assertTrue(result.results[0].has_knowledge())
+
+    def test_get_auto_complete(self):
+        """测试自动补全"""
+        suggestions = self.engine.get_auto_complete("P03")
+        self.assertIn("P0300", suggestions)
 
 
 if __name__ == "__main__":
