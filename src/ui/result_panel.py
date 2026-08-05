@@ -676,6 +676,9 @@ class ResultPanel(QWidget):
         """
         self.clear()
         self._current_result = result
+        # 多码诊断不支持单码症状录入，重置症状区（清空上次单码的残留状态）
+        self._current_code = None
+        self._refresh_symptoms_display()
 
         # 构建知识库区域：显示各故障码信息
         kb_html = self._build_multi_code_kb_html(result)

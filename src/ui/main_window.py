@@ -49,7 +49,7 @@ class _RightClickComboBox(QComboBox):
         """返回 view 右键信号，外部可连接"""
         return self._view_filter.right_clicked
 
-from src.engine.diagnostic import DiagnosticEngine, DiagnosticResult
+from src.engine.diagnostic import DiagnosticEngine, DiagnosticResult, MultiCodeDiagnosticResult
 from src.ui.result_panel import ResultPanel
 from src.ui.agent_chat import AgentChatPanel
 from src.ui.history_panel import HistoryPanel
@@ -1078,6 +1078,59 @@ class MainWindow(QMainWindow):
         except Exception as e:
             self.status_bar.showMessage(f"保存历史记录失败: {e}")
 
+    @staticmethod
+    def _split_history_codes(code: str) -> list:
+        """从历史记录 code 字段中拆分故障码（支持 P/B/C/U 及 EV 码）"""
+        import re as _re
+        return _re.findall(
+            r'(?:EV-[A-Z]+-\d+|P[0-9A-Fa-f]{4}|B[0-9A-Fa-f]{4}|C[0-9A-Fa-f]{4}|U[0-9A-Fa-f]{4})',
+            code.upper()
+        )
+
+    @staticmethod
+    def _aggregate_knowledge(results: list, code: str = "") -> Optional[dict]:
+        """将多个故障码的知识库信息聚合成单个导出用字典（用于多码导出）"""
+        systems = set()
+        descriptions = []
+        details = []
+        causes = []
+        steps = []
+        severity = "medium"
+        sev_order = {"low": 0, "medium": 1, "high": 2, "critical": 3}
+
+        for r in results:
+            kb = r.knowledge if hasattr(r, "knowledge") else getattr(r, "_knowledge", None)
+            if not kb:
+                continue
+            sys_name = kb.get("system", "")
+            if sys_name:
+                systems.add(sys_name)
+            if kb.get("description"):
+                descriptions.append(kb.get("description", ""))
+            if kb.get("detail"):
+                details.append(kb.get("detail", ""))
+            for c in kb.get("common_causes", []) or []:
+                causes.append(c)
+            for s in kb.get("diagnostic_steps", []) or []:
+                steps.append(s)
+            if sev_order.get(kb.get("severity", ""), -1) > sev_order.get(severity, -1):
+                severity = kb.get("severity", severity)
+
+        if not descriptions and not causes and not steps:
+            return None
+
+        return {
+            "code": code,
+            "system": ", ".join(sorted(systems)),
+            "code_type": "多故障码聚合",
+            "description": "；".join(descriptions),
+            "detail": "；".join(details),
+            "severity": severity,
+            "common_causes": causes,
+            "diagnostic_steps": steps,
+            "related_codes": [],
+        }
+
     def _export_current_result(self):
         """导出当前诊断结果"""
         from PyQt6.QtWidgets import QFileDialog
@@ -1091,8 +1144,21 @@ class MainWindow(QMainWindow):
         vehicle = self._get_vehicle_info()
         symptom = self.symptom_input.text().strip()
 
+        # 兼容单码 / 多码（MultiCodeDiagnosticResult 无 code/knowledge 字段）
+        if isinstance(result, MultiCodeDiagnosticResult):
+            code = ", ".join(result.codes)
+            agg = self._aggregate_knowledge(result.results, code=code)
+            knowledge = agg if agg else None
+            ai_suggestion = result.ai_suggestion
+            timestamp = result.timestamp
+        else:
+            code = result.code
+            knowledge = result.knowledge
+            ai_suggestion = result.ai_suggestion
+            timestamp = result.timestamp
+
         # 默认文件名
-        default_name = f"诊断报告_{result.code}_{result.timestamp.replace(':', '-').replace(' ', '_')}"
+        default_name = f"诊断报告_{code}_{timestamp.replace(':', '-').replace(' ', '_')}"
 
         # 文件保存对话框
         file_path, selected_filter = QFileDialog.getSaveFileName(
@@ -1110,12 +1176,12 @@ class MainWindow(QMainWindow):
                 if not file_path.lower().endswith(".pdf"):
                     file_path += ".pdf"
                 content = export_as_pdf(
-                    code=result.code,
-                    knowledge=result.knowledge,
-                    ai_suggestion=result.ai_suggestion,
+                    code=code,
+                    knowledge=knowledge,
+                    ai_suggestion=ai_suggestion,
                     vehicle_info=vehicle,
                     symptoms=symptom,
-                    timestamp=result.timestamp,
+                    timestamp=timestamp,
                 )
                 with open(file_path, "wb") as f:
                     f.write(content)
@@ -1123,12 +1189,12 @@ class MainWindow(QMainWindow):
                 if not file_path.lower().endswith(".html"):
                     file_path += ".html"
                 content = export_as_html(
-                    code=result.code,
-                    knowledge=result.knowledge,
-                    ai_suggestion=result.ai_suggestion,
+                    code=code,
+                    knowledge=knowledge,
+                    ai_suggestion=ai_suggestion,
                     vehicle_info=vehicle,
                     symptoms=symptom,
-                    timestamp=result.timestamp,
+                    timestamp=timestamp,
                 )
                 with open(file_path, "w", encoding="utf-8") as f:
                     f.write(content)
@@ -1136,12 +1202,12 @@ class MainWindow(QMainWindow):
                 if not file_path.lower().endswith(".txt"):
                     file_path += ".txt"
                 content = export_as_text(
-                    code=result.code,
-                    knowledge=result.knowledge,
-                    ai_suggestion=result.ai_suggestion,
+                    code=code,
+                    knowledge=knowledge,
+                    ai_suggestion=ai_suggestion,
                     vehicle_info=vehicle,
                     symptoms=symptom,
-                    timestamp=result.timestamp,
+                    timestamp=timestamp,
                 )
                 with open(file_path, "w", encoding="utf-8") as f:
                     f.write(content)
@@ -1160,12 +1226,20 @@ class MainWindow(QMainWindow):
             return
 
         # 重新查询知识库获取完整数据
-        # 多码历史记录的 code 可能是 "P0300, P0171" 形式，需要拆分查询
-        import re as _re
-        code_parts = _re.findall(r'[PBCU][0-9A-Fa-f]{3,4}', code.upper())
+        # 历史记录的 code 可能是 "P0300, P0171"（多码）或 EV 码，统一用专用解析器拆分
+        code_parts = self._split_history_codes(code)
         if len(code_parts) > 1:
-            knowledge = None  # 多码历史导出不含单一知识库详情
+            # 多码历史导出：逐个查询并聚合知识库详情
+            kb_items = []
+            for c in code_parts:
+                kb = self.engine.kb.lookup(c)
+                kb_items.append(type("_R", (), {"knowledge": kb})())
+            knowledge = self._aggregate_knowledge(kb_items, code=", ".join(code_parts))
             code = ", ".join(code_parts)
+        elif code_parts:
+            # 单码
+            code = code_parts[0]
+            knowledge = self.engine.kb.lookup(code)
         else:
             knowledge = self.engine.kb.lookup(code)
 

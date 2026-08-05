@@ -379,8 +379,6 @@ class AgentChatPanel(QWidget):
 
     def _on_tool_result(self, tool_name: str, result_summary: str):
         """工具返回结果时显示"""
-        # 截取第一行作为摘要
-        first_line = result_summary.split("\n")[0][:100]
         self._append_message("system", f"✅ {tool_name} 查询完成")
 
     def _on_stream_finished(self):
