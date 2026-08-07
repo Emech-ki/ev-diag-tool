@@ -210,12 +210,12 @@ class TestPromptTemplates(unittest.TestCase):
         from src.ai.prompt_templates import PromptTemplates
 
         templates = PromptTemplates()
-        bms = templates.get_expert_system_prompt("bms")
-        self.assertIn("BMS 电池管理系统", bms)
+        battery = templates.get_expert_system_prompt("battery")
+        self.assertIn("电池系统", battery)
         motor = templates.get_expert_system_prompt("motor")
         self.assertIn("电机驱动系统", motor)
-        thermal = templates.get_expert_system_prompt("thermal")
-        self.assertIn("热管理系统", thermal)
+        vcu = templates.get_expert_system_prompt("vcu")
+        self.assertIn("电控系统", vcu)
         # 未知专家回退到通用（无角色声明）
         unknown = templates.get_expert_system_prompt("unknown")
         general = templates.get_expert_system_prompt("general")
@@ -274,8 +274,25 @@ class TestPromptTemplates(unittest.TestCase):
         self.assertIn("冷车抖动", prompt)
         self.assertIn("关联性判断", prompt)
         self.assertIn("火花塞", prompt)
+        # 有症状上下文 → 对症下药：含「已报告的症状」与候选码排序指令
+        self.assertIn("已报告的症状", prompt)
+        self.assertIn("对症下药", prompt)
+        self.assertIn("候选码可能性排序", prompt)
         # high 级别 → 包含安全警告
         self.assertIn("安全警告", prompt)
+
+    def test_multi_prompt_without_symptom(self):
+        """无症状上下文时不出现对症下药排序段"""
+        from src.ai.prompt_templates import PromptTemplates
+
+        templates = PromptTemplates()
+        prompt = templates.build_multi_diagnostic_prompt(
+            codes=["P0300"],
+            results=[{"description": "失火", "severity": "medium", "system": "P"}],
+            correlation_summary="",
+        )
+        self.assertNotIn("候选码可能性排序", prompt)
+        self.assertIn("故障码关联性判断", prompt)
 
     def test_multi_prompt_critical_severity(self):
         """测试多码中存在 critical 时取最高严重度"""
@@ -1041,16 +1058,19 @@ class TestAgentExpertRouting(unittest.TestCase):
         os.rmdir(self.temp_dir)
 
     def test_route_ev_bms(self):
-        self.assertEqual(self.agent._select_expert("EV-BMS-001", ""), "bms")
+        self.assertEqual(self.agent._select_expert("EV-BMS-001", ""), "battery")
 
     def test_route_ev_motor(self):
         self.assertEqual(self.agent._select_expert("EV-MOTOR-001", ""), "motor")
 
     def test_route_ev_thermal(self):
-        self.assertEqual(self.agent._select_expert("EV-THERMAL-001", ""), "thermal")
+        self.assertEqual(self.agent._select_expert("EV-THERMAL-001", ""), "battery")
+
+    def test_route_ev_vcu(self):
+        self.assertEqual(self.agent._select_expert("EV-VCU-001", ""), "vcu")
 
     def test_route_p0a_default_bms(self):
-        self.assertEqual(self.agent._select_expert("P0A00", ""), "bms")
+        self.assertEqual(self.agent._select_expert("P0A00", ""), "battery")
 
     def test_route_p0a_motor_desc(self):
         """P0Axx 码描述含电机关键词 → 电机专家"""
@@ -1061,13 +1081,13 @@ class TestAgentExpertRouting(unittest.TestCase):
         self.assertEqual(self.agent._select_expert("B1100", ""), "general")
 
     def test_route_keywords_bms(self):
-        self.assertEqual(self.agent._select_expert(None, "电池绝缘问题"), "bms")
+        self.assertEqual(self.agent._select_expert(None, "电池绝缘问题"), "battery")
 
     def test_route_keywords_motor(self):
         self.assertEqual(self.agent._select_expert(None, "电机扭矩异常"), "motor")
 
-    def test_route_keywords_thermal(self):
-        self.assertEqual(self.agent._select_expert(None, "冷却液泄漏"), "thermal")
+    def test_route_keywords_vcu(self):
+        self.assertEqual(self.agent._select_expert(None, "整车无法上电"), "vcu")
 
     def test_route_default_general(self):
         self.assertEqual(self.agent._select_expert(None, "随便聊聊"), "general")

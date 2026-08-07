@@ -25,7 +25,7 @@ EXPERT_JSON = os.path.join(PROJECT_ROOT, "data", "seed", "expert_context.json")
 
 EXPECTED_SYSTEMS = {
     "EV-BMS", "EV-MOTOR", "EV-OBC", "EV-DCDC",
-    "EV-THERMAL", "EV-HV", "EV-REGEN",
+    "EV-THERMAL", "EV-HV", "EV-REGEN", "EV-VCU",
 }
 
 
@@ -94,7 +94,15 @@ class TestEVSystemCodesCSV(unittest.TestCase):
         for r in rows:
             counts[r["system"]] = counts.get(r["system"], 0) + 1
         for sys_name in EXPECTED_SYSTEMS:
-            self.assertGreaterEqual(counts.get(sys_name, 0), 20, f"{sys_name} 条数不足")
+            self.assertGreaterEqual(counts.get(sys_name, 0), 50, f"{sys_name} 条数不足")
+
+    def test_total_codes_ge_300(self):
+        rows = _load_rows()
+        self.assertGreaterEqual(len(rows), 300, f"EV 系统码总数不足: {len(rows)}")
+
+    def test_total_codes_ge_400(self):
+        rows = _load_rows()
+        self.assertGreaterEqual(len(rows), 400, f"EV 系统码总数不足（三电含 EV-VCU）: {len(rows)}")
 
 
 class TestEVSystemCodesSeedable(unittest.TestCase):
@@ -189,10 +197,16 @@ class TestEVExpertRouting(unittest.TestCase):
     def test_obc_dcdc_to_bms_regen_to_motor(self):
         with open(EXPERT_JSON, encoding="utf-8") as f:
             ctx = json.load(f)
-        self.assertIn("EV-OBC", ctx["bms"]["domains"])
-        self.assertIn("EV-DCDC", ctx["bms"]["domains"])
+        self.assertIn("EV-OBC", ctx["battery"]["domains"])
+        self.assertIn("EV-DCDC", ctx["battery"]["domains"])
         self.assertIn("EV-REGEN", ctx["motor"]["domains"])
-        self.assertIn("EV-HV", ctx["bms"]["domains"])
+        self.assertIn("EV-HV", ctx["battery"]["domains"])
+        self.assertIn("EV-THERMAL", ctx["battery"]["domains"])
+
+    def test_vcu_domain_exists(self):
+        with open(EXPERT_JSON, encoding="utf-8") as f:
+            ctx = json.load(f)
+        self.assertIn("EV-VCU", ctx["vcu"]["domains"])
 
     def _make_agent(self, system):
         from src.ai.agent import DiagnosticAgent
@@ -204,13 +218,14 @@ class TestEVExpertRouting(unittest.TestCase):
 
     def test_select_expert_routes_new_systems(self):
         cases = {
-            "EV-BMS": "bms",
-            "EV-HV": "bms",
-            "EV-OBC": "bms",
-            "EV-DCDC": "bms",
+            "EV-BMS": "battery",
+            "EV-HV": "battery",
+            "EV-OBC": "battery",
+            "EV-DCDC": "battery",
+            "EV-THERMAL": "battery",
             "EV-MOTOR": "motor",
             "EV-REGEN": "motor",
-            "EV-THERMAL": "thermal",
+            "EV-VCU": "vcu",
         }
         for system, expected in cases.items():
             agent = self._make_agent(system)

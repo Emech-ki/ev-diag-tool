@@ -10,11 +10,11 @@
 
 | 指标 | 数值 |
 |------|------|
-| **版本** | v3.4.3 |
-| **测试** | 515 个全部通过 |
+| **版本** | v3.5.0 |
+| **测试** | 567 个全部通过 |
 | **覆盖率** | 75%（逻辑层 85%+） |
-| **故障码** | 8875 条（100% 中文） |
-| **详细信息覆盖** | 100%（8875 条） |
+| **故障码** | 9129 条（100% 中文） |
+| **详细信息覆盖** | EV 系统码 400 条 100% 有详情；P/B/C/U 部分覆盖（以当前 DB 为准） |
 | **车型数据** | 45 款 / 18 品牌 |
 
 ---
@@ -84,7 +84,7 @@ python src/main.py
 ```bash
 python scripts/seed_db.py    # 初始化数据库（含新能源码+车型数据）
 python src/main.py           # 运行程序
-pytest tests/                # 运行测试（515个测试）
+pytest tests/                # 运行测试（516个测试）
 ```
 
 ### 打包成 exe
@@ -203,7 +203,7 @@ pyinstaller EV-Diag-Tool.spec --noconfirm
 
 | 功能 | 说明 |
 |------|------|
-| **故障码查询** | 支持 P/B/C/U 系列 + EV 系统码，共 8875 条故障码 |
+| **故障码查询** | 支持 P/B/C/U 系列 + EV 系统码，共 9129 条故障码 |
 | **AI 诊断建议** | 支持 Ollama 本地模型 + OpenAI 兼容 API |
 | **AI Agent 对话** | 流式 Tool Calling，对话式排查引导 |
 | **多 Agent 协作** | 专家路由系统（BMS/电机/热管理/通用） |
@@ -232,13 +232,13 @@ pyinstaller EV-Diag-Tool.spec --noconfirm
 
 | 类别 | 数量 | 说明 |
 |-----|------|------|
-| P-codes (动力总成) | 6553 | 标准英文 + 中文详细 |
-| U-codes (网络通讯) | 1231 | 标准英文 + 中文详细 |
-| C-codes (底盘) | 525 | 标准英文 + 中文详细 |
-| B-codes (车身) | 360 | 标准英文 + 中文详细 |
+| P-codes (动力总成) | 6553 | 标准中文描述；详情部分覆盖 |
+| U-codes (网络通讯) | 1231 | 标准中文描述；详情部分覆盖 |
+| C-codes (底盘) | 525 | 标准中文描述；详情部分覆盖 |
+| B-codes (车身) | 360 | 标准中文描述；详情部分覆盖 |
 | EV-codes (新能源标准) | 60 | 中文详细（P0Axx 系列） |
-| EV System-codes (新能源系统) | 146 | 中文详细（BMS/电机/OBC/DC-DC/热管理/高压/再生制动） |
-| **合计** | **8875** | 100% 有详细诊断信息 |
+| EV System-codes (新能源系统) | 400 | 100% 中文详情（BMS/高压/OBC/DC-DC/热管理/电机/再生制动/电控 VCU） |
+| **合计** | **9129** | EV 系统码 400 条 100% 有详情；P/B/C/U 详情以当前 DB 为准 |
 
 ---
 
@@ -256,7 +256,10 @@ ev-diag-tool/
 │   │   ├── b_codes.csv       # B系列故障码（车身）
 │   │   ├── c_codes.csv       # C系列故障码（底盘）
 │   │   ├── u_codes.csv       # U系列故障码（网络通讯）
-│   │   └── ev_codes.csv      # 新能源专用故障码
+│   │   ├── ev_codes.csv      # 新能源专用故障码
+│   │   ├── ev_system_codes.csv # EV 系统码（BMS/HV/OBC/DC-DC/热管理/电机/再生制动/VCU）
+│   │   ├── three_electric_guide.json # 三电诊断向导数据
+│   │   └── expert_context.json # AI 专家领域定义
 │   └── obd_codes.db          # SQLite数据库（运行时生成）
 │
 ├── src/                      # 源代码
@@ -267,6 +270,7 @@ ev-diag-tool/
 │   │   ├── main_window.py    # 主窗口
 │   │   ├── result_panel.py   # 结果展示面板
 │   │   ├── agent_chat.py     # AI Agent对话面板
+│   │   ├── three_electric_panel.py # 三电诊断面板
 │   │   ├── history_panel.py  # 诊断历史面板
 │   │   ├── export_utils.py   # 诊断结果导出（txt/html/pdf）
 │   │   ├── markdown_renderer.py # Markdown渲染器
@@ -278,6 +282,7 @@ ev-diag-tool/
 │   │   └── schema.py         # 表结构定义
 │   ├── engine/               # 诊断引擎
 │   │   ├── diagnostic.py     # 诊断流程控制
+│   │   ├── three_electric.py # 三电领域定义与概览统计
 │   │   └── knowledge_base.py # 知识库查询
 │   └── ai/                   # AI服务层
 │       ├── llm_client.py     # LLM API客户端
@@ -292,7 +297,7 @@ ev-diag-tool/
 │   ├── batch_enhance_codes.py # 批量增强脚本
 │   └── ...
 │
-└── tests/                    # 单元测试（515个）
+└── tests/                    # 单元测试（516个）
     ├── test_database.py
     ├── test_engine.py
     ├── test_ai.py
@@ -314,6 +319,26 @@ ev-diag-tool/
 ---
 
 ## 版本历史
+
+### v3.5.0 — 三电诊断（2026-08-07）
+
+| # | 新增项 | 文件 |
+|---|------|------|
+| 1 | 新增 EV-VCU 电控系统码 50 条（上电时序/通信/扭矩仲裁/高压许可等），EV 系统码 350→400，故障码总数 9079→9129；`--upsert-db` 改为先删后插保证幂等 | `data/seed/ev_system_codes.csv`, `scripts/generate_ev_system_codes.py`, `scripts/synthesize_ev_details.py` |
+| 2 | 三电领域引擎：battery（BMS/HV/OBC/DC-DC/热管理 250 码）/ motor（电机/再生制动 100 码）/ vcu（电控 50 码），含向导加载 + 覆盖概览统计 | `src/engine/three_electric.py` |
+| 3 | 手写三电向导 JSON：3 子系统 × 4 症状流 × 3 选项，候选码全部命中真实码 | `data/seed/three_electric_guide.json` |
+| 4 | 三电诊断 UI：独立 Tab + 子系统切换 + 每页概览/向导/内嵌 ResultPanel 多码诊断 + 导出 | `src/ui/three_electric_panel.py`, `src/ui/main_window.py` |
+| 5 | AI 专家重构为三电体系：battery/motor/vcu/general，EV-THERMAL→电池域，EV-VCU→电控域 | `data/seed/expert_context.json`, `src/ai/agent.py`, `src/ai/prompt_templates.py`, `src/ai/diagnostic_tools.py` |
+| 6 | 数据/专家路由测试同步，新增三电引擎/向导/UI 测试 | `tests/test_ev_codes.py`, `tests/test_ai.py`, `tests/test_diagnostic_tools.py`, `tests/test_three_electric.py`, `tests/test_ui_three_electric.py` |
+
+### v3.4.4 — EV 码扩充至 350（2026-08-07）
+
+| # | 修复/新增项 | 文件 |
+|---|------|------|
+| 1 | EV 系统码 146 → 350（每系统 50，7 系统），故障码总数 8875→9079 | `data/seed/ev_system_codes.csv`, `scripts/generate_ev_system_codes.py` |
+| 2 | 新增确定性详情生成脚本（纯模板，取代卡死的 Ollama 批量增强）：为新增 204 条 EV 码回填 `detail/common_causes/diagnostic_steps/symptoms`，已存在 AI 详情保留不动 | `scripts/synthesize_ev_details.py` |
+| 3 | `generate_ev_system_codes.py` 新增 `--merge`（幂等追加新码）/ `--sync-db`（DB 详情回写 CSV）模式 | `scripts/generate_ev_system_codes.py` |
+| 4 | 更新 EV 码测试：每系统 ≥20 → ≥50，新增 `test_total_codes_ge_300` | `test_ev_codes.py` |
 
 ### v3.4.3 — EV 码知识库扩充（2026-08-05）
 

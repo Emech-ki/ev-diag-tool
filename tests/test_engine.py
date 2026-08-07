@@ -401,6 +401,21 @@ class TestDiagnosticEngine(unittest.TestCase):
         knowledge_list = called[1]["knowledge_list"]
         self.assertEqual(len(knowledge_list), 2)
 
+    def test_diagnose_multiple_symptom_context(self):
+        """多码诊断携带症状上下文 → 存入结果并透传给 AI"""
+        self.mock_llm.is_available.return_value = True
+        self.mock_llm.get_multi_code_analysis.return_value = "对症建议"
+        ctx = "子系统：电池系统\n故障现象：充不进电\n具体表现：完全无法启动充电"
+        result = self.engine.diagnose_multiple(["P0300"], additional_info=ctx)
+        self.assertEqual(result.symptom_context, ctx)
+        called = self.mock_llm.get_multi_code_analysis.call_args
+        self.assertEqual(called[1]["additional_info"], ctx)
+        # AI 不可用时症状上下文仍保留（供结果面板展示）
+        self.mock_llm.is_available.return_value = False
+        result2 = self.engine.diagnose_multiple(["P0300"], additional_info=ctx)
+        self.assertEqual(result2.symptom_context, ctx)
+        self.assertFalse(result2.has_ai())
+
     def test_diagnose_multiple_ai_exception(self):
         """AI 综合分析抛异常 → 降级"""
         self.mock_llm.is_available.return_value = True

@@ -53,6 +53,7 @@ from src.engine.diagnostic import DiagnosticEngine, DiagnosticResult, MultiCodeD
 from src.ui.result_panel import ResultPanel
 from src.ui.agent_chat import AgentChatPanel
 from src.ui.history_panel import HistoryPanel
+from src.ui.three_electric_panel import ThreeElectricPanel
 from src.ui.styles import (
     PRIMARY, PRIMARY_DARK, PRIMARY_BG,
     BG, CARD_BG, CARD_BORDER,
@@ -214,6 +215,10 @@ class MainWindow(QMainWindow):
         # 停止 Agent 对话 worker
         if hasattr(self, 'agent_panel') and hasattr(self.agent_panel, '_stop_worker'):
             self.agent_panel._stop_worker()
+
+        # 停止三电诊断 worker
+        if hasattr(self, 'three_electric_panel') and hasattr(self.three_electric_panel, '_stop_worker'):
+            self.three_electric_panel._stop_worker()
 
         super().closeEvent(event)
 
@@ -456,6 +461,9 @@ class MainWindow(QMainWindow):
 
         self.agent_panel = AgentChatPanel(self.engine)
         self.tab_widget.addTab(self.agent_panel, "AI 助手")
+
+        self.three_electric_panel = ThreeElectricPanel(self.engine)
+        self.tab_widget.addTab(self.three_electric_panel, "三电诊断")
 
         self.history_panel = HistoryPanel(self.engine.kb.db)
         self.history_panel.export_requested.connect(self._export_history_record)
@@ -1435,3 +1443,5 @@ class MainWindow(QMainWindow):
             self.agent_panel.refresh_theme()
         if hasattr(self, 'history_panel'):
             self.history_panel.refresh_theme()
+        if hasattr(self, 'three_electric_panel'):
+            self.three_electric_panel.refresh_theme()

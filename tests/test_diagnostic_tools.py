@@ -214,8 +214,8 @@ class TestDiagnosticTools(unittest.TestCase):
     # ── 工具10: get_expert_context ──
 
     def test_get_expert_context_known(self):
-        result = self._parse(_get_expert_context(" BMS "))
-        self.assertEqual(result["expert"], "bms")
+        result = self._parse(_get_expert_context(" battery "))
+        self.assertEqual(result["expert"], "battery")
         self.assertIn("name", result)
         self.assertIn("context", result)
 
@@ -231,7 +231,8 @@ class TestDiagnosticTools(unittest.TestCase):
         diag_tools._EXPERT_CONTEXT_CACHE = None
         first = _load_expert_context()
         self.assertGreater(len(first), 0)
-        self.assertIn("bms", first)
+        self.assertIn("battery", first)
+        self.assertIn("vcu", first)
         # 第二次读取命中缓存（同一对象）
         second = _load_expert_context()
         self.assertIs(first, second)

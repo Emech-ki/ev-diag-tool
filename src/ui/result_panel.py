@@ -700,6 +700,7 @@ class ResultPanel(QWidget):
         TEXT_SECONDARY = get_token("TEXT_SECONDARY")
         CARD_BORDER = get_token("CARD_BORDER")
         PRIMARY = get_token("PRIMARY")
+        PRIMARY_BG = get_token("PRIMARY_BG")
 
         codes_escaped = ", ".join(html.escape(c) for c in result.codes)
         html_out = f"""
@@ -711,6 +712,21 @@ class ResultPanel(QWidget):
                 故障码: {codes_escaped}
             </div>
         """
+
+        # 症状上下文横幅（对症下药的关键信息，即使 AI 不可用也展示）
+        if getattr(result, "symptom_context", ""):
+            ctx_escaped = html.escape(result.symptom_context).replace("\n", "<br>")
+            html_out += f"""
+            <div style="background-color: {PRIMARY_BG}; border-left: 4px solid {PRIMARY};
+                        border-radius: 6px; padding: 10px 14px; margin-bottom: 14px;">
+                <div style="font-size: 12px; font-weight: bold; color: {PRIMARY}; margin-bottom: 4px;">
+                    🎯 诊断对象
+                </div>
+                <div style="font-size: 13px; color: {TEXT_PRIMARY}; line-height: 1.6;">
+                    {ctx_escaped}
+                </div>
+            </div>
+            """
 
         for i, r in enumerate(result.codes, 1):
             kb = result.results[i-1].knowledge if i-1 < len(result.results) else None

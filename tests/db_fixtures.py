@@ -125,6 +125,14 @@ def setup_test_db(db_path):
         "",
         ["电池温度偏高"]
     )
+    _insert_code(
+        "EV-VCU-001", "EV-VCU", "ev", "整车上电时序错误", "VCU检测到整车上电时序与预设逻辑不符",
+        "critical",
+        ["VCU供电异常", "高压许可信号丢失"],
+        ["核对上下电流程", "检查VCU供电"],
+        "",
+        ["车辆无法上电"]
+    )
 
     # 车型数据
     def _insert_vehicle(make, model, year_start, year_end, powertrain,

@@ -37,6 +37,7 @@ class MultiCodeDiagnosticResult:
     results: List[DiagnosticResult]               # 每个码的诊断结果
     ai_suggestion: Optional[str]                  # AI 综合分析建议
     ai_available: bool                            # AI 是否可用
+    symptom_context: str = ""                     # 技师报告的症状上下文（现象/具体表现/排查提示）
     timestamp: str = field(default_factory=lambda: datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
 
     def has_knowledge(self) -> bool:
@@ -141,7 +142,7 @@ class DiagnosticEngine:
         Args:
             codes: 故障码列表
             vehicle_info: 车型信息（可选）
-            additional_info: 附加描述信息（可选）
+            additional_info: 附加描述信息（可选，含向导带入的症状上下文）
 
         Returns:
             MultiCodeDiagnosticResult 对象
@@ -191,7 +192,8 @@ class DiagnosticEngine:
             codes=codes,
             results=results,
             ai_suggestion=ai_suggestion,
-            ai_available=ai_available
+            ai_available=ai_available,
+            symptom_context=additional_info
         )
 
     def search_codes(self, keyword: str) -> List[Dict[str, Any]]:

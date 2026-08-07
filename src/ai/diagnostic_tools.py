@@ -218,7 +218,7 @@ def register_diagnostic_tools(
                 description="系统代码，如 P、B、C、U、EV-BMS",
                 required=True,
                 enum=["P", "B", "C", "U", "EV-BMS", "EV-MOTOR", "EV-OBC",
-                      "EV-DCDC", "EV-THERMAL", "EV-HV", "EV-REGEN",
+                      "EV-DCDC", "EV-THERMAL", "EV-HV", "EV-REGEN", "EV-VCU",
                       "EV-CHARGE", "EV-COMM"],
             ),
         ],
@@ -239,7 +239,7 @@ def register_diagnostic_tools(
                 type="string",
                 description="专家领域",
                 required=True,
-                enum=["bms", "motor", "thermal", "general"],
+                enum=["battery", "motor", "vcu", "general"],
             ),
         ],
         function=lambda expert: _get_expert_context(expert),
@@ -469,6 +469,7 @@ def _get_wiring_info(kb: KnowledgeBase, code: str) -> str:
         "EV-DCDC": "DC-DC — 检查高压输入线缆、低压输出线缆、使能信号线",
         "EV-THERMAL": "热管理 — 检查水泵线束、温度传感器、电子风扇线路",
         "EV-HV": "高压系统 — 检查高压互锁回路、预充电路、高压继电器",
+        "EV-VCU": "整车控制器 — 检查 VCU 供电/接地、整车 CAN 总线、上下电硬线信号",
     }
 
     hint = ev_wiring_hints.get(system) or wiring_hints.get(system[0] if system else "", "通用系统")
@@ -559,6 +560,7 @@ def _search_codes_by_system(kb: KnowledgeBase, system: str) -> str:
         "EV-THERMAL": "热管理系统",
         "EV-HV": "高压系统",
         "EV-REGEN": "再生制动系统",
+        "EV-VCU": "整车控制器（电控）",
         "EV-CHARGE": "充电系统",
         "EV-COMM": "新能源网络通讯",
     }

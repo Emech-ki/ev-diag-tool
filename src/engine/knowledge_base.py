@@ -179,7 +179,7 @@ class KnowledgeBase:
             "U": {"name": "网络", "full_name": "Network (网络通讯)", "icon": "📡"},
         }
         # 新能源系统映射到 P 类
-        ev_systems = {"EV-BMS", "EV-MOTOR", "EV-OBC", "EV-DCDC", "EV-THERMAL", "EV-HV"}
+        ev_systems = {"EV-BMS", "EV-MOTOR", "EV-OBC", "EV-DCDC", "EV-THERMAL", "EV-HV", "EV-VCU"}
         if system_code in ev_systems:
             return {"name": "新能源动力", "full_name": f"EV ({system_code})", "icon": "⚡"}
         first_letter = system_code[0].upper() if system_code else ""
@@ -232,5 +232,15 @@ class KnowledgeBase:
         if info:
             return info.get("common_codes", [])
         return []
+
+    # ── 三电诊断查询 ──
+
+    def get_codes_by_system_prefix(self, prefix: str, limit: int = 200) -> List[Dict[str, Any]]:
+        """按系统码前缀查询故障码（如 EV-BMS、EV-VCU）"""
+        return self.db.get_codes_by_system_prefix(prefix, limit)
+
+    def get_system_detail_coverage(self, systems: tuple) -> List[Dict[str, Any]]:
+        """统计指定系统的覆盖情况（总数 / 有详情数 / 严重度分布）"""
+        return self.db.get_system_detail_coverage(tuple(systems))
 
 

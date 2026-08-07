@@ -8,11 +8,12 @@
 src/
 ├── main.py              # 程序入口
 ├── config.py            # .env 配置读取 + 多端点管理（模块级常量 import 时缓存）
-├── version.py           # 版本号（v3.4.3）
+├── version.py           # 版本号（v3.5.0）
 ├── ui/                  # PyQt6 界面层
 │   ├── main_window.py   # 主窗口（含 QThread worker 定义）
 │   ├── result_panel.py  # 单/多码诊断结果展示
 │   ├── agent_chat.py    # AI Agent 对话面板
+│   ├── three_electric_panel.py  # 三电诊断面板（概览/向导/多码诊断）
 │   ├── history_panel.py # 诊断历史
 │   ├── export_utils.py  # 报告导出（txt/html/pdf，PDF 用 reportlab）
 │   ├── markdown_renderer.py  # Markdown→HTML（含跨 token 粗体缓冲）
@@ -22,6 +23,7 @@ src/
 │   └── schema.py        # 表结构
 ├── engine/
 │   ├── diagnostic.py    # 单/多码诊断流程 + parse_fault_codes
+│   ├── three_electric.py # 三电领域映射 + 向导加载 + 覆盖概览（纯逻辑无 PyQt）
 │   └── knowledge_base.py
 └── ai/
     ├── llm_client.py    # 单例代理，_provider_lock 保护 provider 切换
@@ -33,9 +35,11 @@ src/
 ## 常用命令
 
 ```bash
-python scripts/seed_db.py    # 初始化数据库（8875 码 + 45 车型）
+python scripts/seed_db.py    # 初始化数据库（9129 码 + 45 车型）
+python scripts/synthesize_ev_details.py   # EV 码详情确定性生成（无需 Ollama）
+python scripts/generate_ev_system_codes.py --sync-db   # DB 详情回写 CSV
 python src/main.py           # 运行程序
-pytest tests/                # 515 个测试
+pytest tests/                # 567 个测试
 pytest tests/ --cov=src --cov-report=term-missing  # 覆盖率 75%（逻辑层 85%+）
 python scripts/verify_features.py   # 端到端验证（需 Ollama 在线，45 项）
 ```
@@ -45,7 +49,7 @@ python scripts/verify_features.py   # 端到端验证（需 Ollama 在线，45 �
 - **三层架构**：UI (PyQt6) → 业务逻辑（引擎 + AI）→ 数据（SQLite + Ollama/OpenAI）
 - **AI Provider 抽象**：`LLMProvider` 接口，`OllamaProvider` / `OpenAICompatProvider`，`LLMClient` 单例按配置选择
 - **方案B**：LLM 增强诊断（故障码+车型+描述 → 结构化建议）
-- **方案C**：AI Agent，ReAct 循环 + Tool Calling，专家路由（BMS/电机/热管理/通用）
+- **方案C**：AI Agent，ReAct 循环 + Tool Calling，专家路由（电池/电机/电控/通用）
 - **多端点**：`.env` 中 `OPENAI_ENDPOINT_N_{NAME,URL,KEY,MODEL}`，品牌栏一键切换
 
 ## 代码规范（必须遵守）
@@ -69,11 +73,12 @@ python scripts/verify_features.py   # 端到端验证（需 Ollama 在线，45 �
 
 ## 当前状态
 
-- **版本**：v3.4.3（EV 码知识库扩充）
-- **测试**：515 个全部通过（含 UI 测试、export_as_pdf 4 个）
-- **数据库**：8875 故障码（100% 有详情，含 146 条 EV 系统码）+ 45 车型
+- **版本**：v3.5.0（三电诊断）
+- **测试**：567 个全部通过（含 UI 测试、export_as_pdf 4 个）
+- **数据库**：9129 故障码（EV 系统码 400 条 100% 有详情，各系统 50 条；P/B/C/U 详情部分覆盖）+ 45 车型
 - **AI 配置**：`.env` 指向本地 Ollama `qwen2.5:7b`
 - **打包**：`pyinstaller EV-Diag-Tool.spec --noconfirm`（spec 内改 name 为当前版本号）
+- **EV 详情生成**：`scripts/synthesize_ev_details.py`（确定性模板，无需 Ollama）回填 DB 后，用 `scripts/generate_ev_system_codes.py --sync-db` 回写 CSV
 
 ## 已修复的高危问题（v3.4.2 已提交）
 

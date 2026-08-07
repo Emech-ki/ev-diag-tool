@@ -225,6 +225,47 @@ class DatabaseManager:
         finally:
             conn.close()
 
+    def get_codes_by_system_prefix(self, prefix: str, limit: int = 200) -> List[Dict[str, Any]]:
+        """按系统码前缀查询故障码（如 EV-BMS、EV-VCU）"""
+        conn = self.get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT code, description, severity, detail
+                FROM obd_codes
+                WHERE code LIKE ? ESCAPE '\\'
+                ORDER BY code
+                LIMIT ?
+            """, (f"{prefix}-%", limit))
+            return [dict(row) for row in cursor.fetchall()]
+        finally:
+            conn.close()
+
+    def get_system_detail_coverage(self, systems: tuple) -> List[Dict[str, Any]]:
+        """统计指定系统的覆盖情况（总数 / 有详情数 / 严重度分布）"""
+        if not systems:
+            return []
+        conn = self.get_connection()
+        try:
+            placeholders = ",".join("?" * len(systems))
+            cursor = conn.cursor()
+            cursor.execute(f"""
+                SELECT system,
+                       COUNT(*) AS total,
+                       SUM(CASE WHEN detail IS NULL OR detail = '' THEN 0 ELSE 1 END) AS with_detail,
+                       SUM(CASE WHEN severity = 'low' THEN 1 ELSE 0 END) AS sev_low,
+                       SUM(CASE WHEN severity = 'medium' THEN 1 ELSE 0 END) AS sev_medium,
+                       SUM(CASE WHEN severity = 'high' THEN 1 ELSE 0 END) AS sev_high,
+                       SUM(CASE WHEN severity = 'critical' THEN 1 ELSE 0 END) AS sev_critical
+                FROM obd_codes
+                WHERE system IN ({placeholders})
+                GROUP BY system
+                ORDER BY system
+            """, systems)
+            return [dict(row) for row in cursor.fetchall()]
+        finally:
+            conn.close()
+
     def get_total_count(self) -> int:
         """获取故障码总数"""
         conn = self.get_connection()
