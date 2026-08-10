@@ -10,29 +10,39 @@
 """
 
 import json
+import logging
 from pathlib import Path
 from typing import Optional, Dict, Any, List
 
 from src.engine.knowledge_base import KnowledgeBase
 
-# 三电 → 覆盖的 EV 系统码
+logger = logging.getLogger(__name__)
+
+# 三电 → 覆盖的 EV 系统码（域映射单一真源）
+# 修改此映射即同步影响：向导概览 / 专家路由(_select_expert) / 专家展示名
+# expert_context.json 的 domains 由 get_expert_domains() 校验一致性
 THREE_ELECTRIC = {
     "battery": {
         "name": "电池系统",
+        "expert_name": "电池系统专家",
         "icon": "🔋",
         "systems": ("EV-BMS", "EV-HV", "EV-OBC", "EV-DCDC", "EV-THERMAL"),
     },
     "motor": {
         "name": "电机系统",
+        "expert_name": "电机驱动专家",
         "icon": "⚙️",
         "systems": ("EV-MOTOR", "EV-REGEN"),
     },
     "vcu": {
         "name": "电控系统",
+        "expert_name": "电控系统专家",
         "icon": "🖥️",
         "systems": ("EV-VCU",),
     },
 }
+
+GENERAL_EXPERT_NAME = "通用诊断专家"
 
 _GUIDE_CACHE = None
 _GUIDE_PATH = Path(__file__).resolve().parent.parent.parent / "data" / "seed" / "three_electric_guide.json"
@@ -50,6 +60,31 @@ def get_systems_for(subsystem: str) -> tuple:
     """返回子系统覆盖的系统码元组"""
     info = THREE_ELECTRIC.get(subsystem)
     return tuple(info["systems"]) if info else ()
+
+
+def get_expert_domains() -> Dict[str, tuple]:
+    """返回 子系统 → 覆盖系统码 的映射（专家路由域映射单一来源）"""
+    return {key: info["systems"] for key, info in THREE_ELECTRIC.items()}
+
+
+def get_subsystem_for_system(system: str) -> Optional[str]:
+    """
+    按系统码前缀路由到三电子系统（battery/motor/vcu），未知返回 None
+
+    匹配规则：系统码以 mapping 中任一前缀开头即命中（如 EV-BMS-001 → battery）。
+    """
+    sys_upper = (system or "").upper()
+    for key, systems in get_expert_domains().items():
+        for prefix in systems:
+            if sys_upper.startswith(prefix):
+                return key
+    return None
+
+
+def get_expert_name(subsystem: str) -> str:
+    """返回子系统对应的专家展示名（未匹配则返回通用诊断专家）"""
+    info = THREE_ELECTRIC.get(subsystem)
+    return info["expert_name"] if info else GENERAL_EXPERT_NAME
 
 
 def load_three_electric_guide() -> dict:
@@ -104,7 +139,8 @@ def build_overview(kb: KnowledgeBase, subsystem: str) -> Dict[str, Any]:
             filtered.extend(rows)
         filtered.sort(key=lambda r: sev_order.get(r.get("severity", "low"), 9))
         common = filtered[:10]
-    except Exception:
+    except (KeyError, TypeError, AttributeError) as e:
+        logger.debug(f"build_overview common_codes 查询失败: {e}")
         common = []
 
     return {

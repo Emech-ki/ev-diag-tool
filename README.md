@@ -11,7 +11,7 @@
 | 指标 | 数值 |
 |------|------|
 | **版本** | v3.5.1 |
-| **测试** | 582 个全部通过 |
+| **测试** | 587 个全部通过 |
 | **覆盖率** | 75%（逻辑层 85%+） |
 | **故障码** | 9129 条（100% 中文） |
 | **详细信息覆盖** | EV 系统码 400 条 100% 有详情；P/B/C/U 部分覆盖（以当前 DB 为准） |
@@ -84,7 +84,7 @@ python src/main.py
 ```bash
 python scripts/seed_db.py    # 初始化数据库（含新能源码+车型数据）
 python src/main.py           # 运行程序
-pytest tests/                # 运行测试（582个测试）
+pytest tests/                # 运行测试（587个测试）
 ```
 
 ### 打包成 exe
@@ -297,7 +297,7 @@ ev-diag-tool/
 │   ├── batch_enhance_codes.py # 批量增强脚本
 │   └── ...
 │
-└── tests/                    # 单元测试（582个）
+└── tests/                    # 单元测试（587个）
     ├── test_database.py
     ├── test_engine.py
     ├── test_ai.py
@@ -329,6 +329,8 @@ ev-diag-tool/
 | 3 | 修复 `do_sync_db` 注释与实现不符：DB 无详情时不再用空值覆盖 CSV 原有详情（提取 `_merge_sync_rows` 纯函数） | `scripts/generate_ev_system_codes.py`, `tests/test_generate_ev_codes.py` |
 | 4 | Ollama 在线验证：`build_multi_diagnostic_prompt` 排序指令在 qwen2.5:7b 实测有效（高疑似码排前）；`verify_features.py` 45/45 全绿 | 文档同步 |
 | 5 | 打包验证：`pyinstaller` 生成 v3.5.1 exe 并可正常启动；文档/测试数同步（567 → 582） | `EV-Diag-Tool.spec`, `README.md`, `CLAUDE.md` |
+| 6 | 域映射单一真源：`THREE_ELECTRIC` 收敛专家路由（`get_subsystem_for_system`/`get_expert_name`/`get_expert_domains`），`_select_expert` 删除硬编码 EV 系统码 if 链；`expert_context.json` domains 与之一致性测试兜底。新增 EV 系统码只需改一处 | `src/engine/three_electric.py`, `src/ai/agent.py`, `tests/test_three_electric.py`, `tests/test_ev_codes.py` |
+| 7 | `build_overview` 收窄异常：`except Exception` → `except (KeyError, TypeError, AttributeError)`（不再吞 KB 结构错误） | `src/engine/three_electric.py` |
 
 ### v3.5.0 — 三电诊断（2026-08-07）
 

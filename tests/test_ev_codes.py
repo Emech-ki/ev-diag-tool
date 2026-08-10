@@ -208,6 +208,15 @@ class TestEVExpertRouting(unittest.TestCase):
             ctx = json.load(f)
         self.assertIn("EV-VCU", ctx["vcu"]["domains"])
 
+    def test_expert_domains_match_three_electric(self):
+        """expert_context.json domains 必须与 three_electric 单一真源一致"""
+        from src.engine.three_electric import get_expert_domains
+        with open(EXPERT_JSON, encoding="utf-8") as f:
+            ctx = json.load(f)
+        for expert, systems in get_expert_domains().items():
+            self.assertEqual(set(ctx[expert]["domains"]), set(systems),
+                             f"{expert} 域名与 three_electric 不一致")
+
     def _make_agent(self, system):
         from src.ai.agent import DiagnosticAgent
         agent = DiagnosticAgent.__new__(DiagnosticAgent)

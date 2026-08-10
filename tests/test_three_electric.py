@@ -50,6 +50,39 @@ class TestThreeElectricMapping(unittest.TestCase):
     def test_unknown_subsystem_returns_empty(self):
         self.assertEqual(three_electric.get_systems_for("nope"), ())
 
+    def test_expert_domains_match_mapping(self):
+        """专家路由域映射 = THREE_ELECTRIC 单一真源"""
+        domains = three_electric.get_expert_domains()
+        self.assertEqual(set(domains.keys()), set(EXPECTED_SUBSYSTEMS.keys()))
+        for sub, systems in EXPECTED_SUBSYSTEMS.items():
+            self.assertEqual(set(domains[sub]), systems)
+
+    def test_subsystem_for_system_routing(self):
+        """按系统码前缀路由（EV-BMS-001 → battery）"""
+        cases = {
+            "EV-BMS-001": "battery",
+            "EV-HV-002": "battery",
+            "EV-OBC-003": "battery",
+            "EV-DCDC-004": "battery",
+            "EV-THERMAL-005": "battery",
+            "EV-MOTOR-001": "motor",
+            "EV-REGEN-002": "motor",
+            "EV-VCU-003": "vcu",
+        }
+        for system, expected in cases.items():
+            self.assertEqual(three_electric.get_subsystem_for_system(system), expected, system)
+
+    def test_subsystem_for_system_unknown(self):
+        self.assertIsNone(three_electric.get_subsystem_for_system("EV-AIRCON-001"))
+        self.assertIsNone(three_electric.get_subsystem_for_system("P0300"))
+        self.assertIsNone(three_electric.get_subsystem_for_system(""))
+
+    def test_get_expert_name(self):
+        self.assertEqual(three_electric.get_expert_name("battery"), "电池系统专家")
+        self.assertEqual(three_electric.get_expert_name("motor"), "电机驱动专家")
+        self.assertEqual(three_electric.get_expert_name("vcu"), "电控系统专家")
+        self.assertEqual(three_electric.get_expert_name("nope"), "通用诊断专家")
+
 
 class TestThreeElectricGuide(unittest.TestCase):
     """向导 JSON 数据完整性"""

@@ -18,6 +18,7 @@ from typing import Optional, Dict, Any, List, Callable, Iterator
 logger = logging.getLogger(__name__)
 
 from src.engine.knowledge_base import KnowledgeBase
+from src.engine.three_electric import get_subsystem_for_system, get_expert_name
 from src.ai.llm_client import LLMClient
 from src.ai.providers import StreamEvent
 from src.ai.tools import ToolRegistry
@@ -668,7 +669,11 @@ class DiagnosticAgent:
         messages.append({"role": "system", "content": system_prompt})
 
         # 如果有活跃的诊断会话，添加上下文（含专家名称）
-        expert_names = {"battery": "电池系统专家", "motor": "电机驱动专家", "vcu": "电控系统专家", "general": "通用诊断专家"}
+        expert_names = {
+            key: get_expert_name(key)
+            for key in ("battery", "motor", "vcu")
+        }
+        expert_names["general"] = "通用诊断专家"
         if self.session_code:
             context = f"\n[当前诊断上下文]\n故障码: {self.session_code}"
             if self.session_vehicle:
@@ -702,15 +707,10 @@ class DiagnosticAgent:
                     system = (kb_data.get("system") or "").upper()
                     desc = (kb_data.get("description") or "").lower()
 
-                    # 按 system 字段路由（三电体系）
-                    if ("EV-BMS" in system or "EV-HV" in system
-                            or "EV-OBC" in system or "EV-DCDC" in system
-                            or "EV-THERMAL" in system):
-                        return "battery"
-                    if "EV-MOTOR" in system or "EV-REGEN" in system:
-                        return "motor"
-                    if "EV-VCU" in system:
-                        return "vcu"
+                    # 按 system 字段路由（三电体系，域映射单一真源）
+                    subsystem = get_subsystem_for_system(system)
+                    if subsystem:
+                        return subsystem
 
                     # P0Axx 码按描述关键词细分
                     if code_upper.startswith("P0A"):
