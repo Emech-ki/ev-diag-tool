@@ -1,5 +1,5 @@
 """
-三电诊断 — 引擎层测试（v3.5.0）
+三电诊断 — 引擎层测试（v3.5.1）
 
 覆盖:
 - THREE_ELECTRIC 域映射完整性（battery/motor/vcu → 系统码）
@@ -220,7 +220,42 @@ class TestThreeElectricWorker(unittest.TestCase):
         loop.exec()
 
         self.assertNotIn("error", result)
-        engine.diagnose_multiple.assert_called_once_with(codes=["EV-BMS-001"], additional_info=ctx)
+        engine.diagnose_multiple.assert_called_once_with(
+            codes=["EV-BMS-001"], additional_info=ctx, priority_codes=[]
+        )
+
+    def test_worker_forwards_priority_codes(self):
+        """worker 把向导候选码顺序作为高疑似标记透传给 diagnose_multiple"""
+        from PyQt6.QtWidgets import QApplication
+        from PyQt6.QtCore import QEventLoop
+        app = QApplication.instance() or QApplication(sys.argv)
+
+        from src.engine.diagnostic import DiagnosticEngine
+        from src.ui.three_electric_panel import ThreeElectricDiagnoseWorker
+
+        engine = DiagnosticEngine()
+        engine.diagnose_multiple = MagicMock()
+        engine.diagnose_multiple.return_value.has_knowledge.return_value = True
+        engine.diagnose_multiple.return_value.codes = ["EV-BMS-001"]
+
+        worker = ThreeElectricDiagnoseWorker(
+            engine, ["EV-BMS-001", "EV-BMS-015"],
+            symptom_context="ctx",
+            priority_codes=["EV-BMS-001", "EV-BMS-015"],
+        )
+        loop = QEventLoop()
+        result = {}
+        worker.finished.connect(lambda r: (result.__setitem__("result", r), loop.quit()))
+        worker.error.connect(lambda e: (result.__setitem__("error", e), loop.quit()))
+        worker.start()
+        loop.exec()
+
+        self.assertNotIn("error", result)
+        engine.diagnose_multiple.assert_called_once_with(
+            codes=["EV-BMS-001", "EV-BMS-015"],
+            additional_info="ctx",
+            priority_codes=["EV-BMS-001", "EV-BMS-015"],
+        )
 
 
 if __name__ == "__main__":

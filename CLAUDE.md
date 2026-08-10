@@ -8,7 +8,7 @@
 src/
 ├── main.py              # 程序入口
 ├── config.py            # .env 配置读取 + 多端点管理（模块级常量 import 时缓存）
-├── version.py           # 版本号（v3.5.0）
+├── version.py           # 版本号（v3.5.1）
 ├── ui/                  # PyQt6 界面层
 │   ├── main_window.py   # 主窗口（含 QThread worker 定义）
 │   ├── result_panel.py  # 单/多码诊断结果展示
@@ -39,7 +39,7 @@ python scripts/seed_db.py    # 初始化数据库（9129 码 + 45 车型）
 python scripts/synthesize_ev_details.py   # EV 码详情确定性生成（无需 Ollama）
 python scripts/generate_ev_system_codes.py --sync-db   # DB 详情回写 CSV
 python src/main.py           # 运行程序
-pytest tests/                # 567 个测试
+pytest tests/                # 582 个测试
 pytest tests/ --cov=src --cov-report=term-missing  # 覆盖率 75%（逻辑层 85%+）
 python scripts/verify_features.py   # 端到端验证（需 Ollama 在线，45 项）
 ```
@@ -51,6 +51,8 @@ python scripts/verify_features.py   # 端到端验证（需 Ollama 在线，45 �
 - **方案B**：LLM 增强诊断（故障码+车型+描述 → 结构化建议）
 - **方案C**：AI Agent，ReAct 循环 + Tool Calling，专家路由（电池/电机/电控/通用）
 - **多端点**：`.env` 中 `OPENAI_ENDPOINT_N_{NAME,URL,KEY,MODEL}`，品牌栏一键切换
+- **三电高疑似链路（v3.5.1）**：向导候选码顺序 = `priority_codes`，贯穿 `ThreeElectricDiagnoseWorker` → `diagnose_multiple(priority_codes=)` → `MultiCodeDiagnosticResult.priority_codes` → AI prompt「高疑似候选码」段 → 结果面板「🎯 高疑似」徽标排前（不依赖 AI 排序）。修改向导 JSON 顺序即改变高疑似优先级
+- **导出聚合共用**：多码导出统一走 `export_utils.aggregate_multi_knowledge`（`main_window._aggregate_knowledge` 与三电面板 `_on_export` 均委托它）；导出 `symptoms=` 传 `result.symptom_context`
 
 ## 代码规范（必须遵守）
 
@@ -73,8 +75,8 @@ python scripts/verify_features.py   # 端到端验证（需 Ollama 在线，45 �
 
 ## 当前状态
 
-- **版本**：v3.5.0（三电诊断）
-- **测试**：567 个全部通过（含 UI 测试、export_as_pdf 4 个）
+- **版本**：v3.5.1（三电诊断增强）
+- **测试**：582 个全部通过（含 UI 测试、export_as_pdf 4 个）
 - **数据库**：9129 故障码（EV 系统码 400 条 100% 有详情，各系统 50 条；P/B/C/U 详情部分覆盖）+ 45 车型
 - **AI 配置**：`.env` 指向本地 Ollama `qwen2.5:7b`
 - **打包**：`pyinstaller EV-Diag-Tool.spec --noconfirm`（spec 内改 name 为当前版本号）

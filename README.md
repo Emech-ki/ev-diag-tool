@@ -10,8 +10,8 @@
 
 | 指标 | 数值 |
 |------|------|
-| **版本** | v3.5.0 |
-| **测试** | 567 个全部通过 |
+| **版本** | v3.5.1 |
+| **测试** | 582 个全部通过 |
 | **覆盖率** | 75%（逻辑层 85%+） |
 | **故障码** | 9129 条（100% 中文） |
 | **详细信息覆盖** | EV 系统码 400 条 100% 有详情；P/B/C/U 部分覆盖（以当前 DB 为准） |
@@ -84,7 +84,7 @@ python src/main.py
 ```bash
 python scripts/seed_db.py    # 初始化数据库（含新能源码+车型数据）
 python src/main.py           # 运行程序
-pytest tests/                # 运行测试（516个测试）
+pytest tests/                # 运行测试（582个测试）
 ```
 
 ### 打包成 exe
@@ -195,7 +195,7 @@ pyinstaller EV-Diag-Tool.spec --noconfirm
 - 支持 few-shot 示例、CoT 推理
 - 严重程度自适应（高危故障码加强安全提醒）
 - 新能源安全提醒（高压系统操作警告）
-- 专家角色声明（BMS/电机/热管理专家路由）
+- 专家角色声明（电池/电机/电控专家路由）
 
 ---
 
@@ -206,7 +206,7 @@ pyinstaller EV-Diag-Tool.spec --noconfirm
 | **故障码查询** | 支持 P/B/C/U 系列 + EV 系统码，共 9129 条故障码 |
 | **AI 诊断建议** | 支持 Ollama 本地模型 + OpenAI 兼容 API |
 | **AI Agent 对话** | 流式 Tool Calling，对话式排查引导 |
-| **多 Agent 协作** | 专家路由系统（BMS/电机/热管理/通用） |
+| **多 Agent 协作** | 专家路由系统（电池/电机/电控/通用） |
 | **多故障码分析** | 自动识别多个故障码，综合分析因果关系 |
 | **深色模式** | 主题切换，持久化到 .env |
 | **诊断结果导出** | 支持 txt/html/pdf 格式（PDF 用 reportlab） |
@@ -297,7 +297,7 @@ ev-diag-tool/
 │   ├── batch_enhance_codes.py # 批量增强脚本
 │   └── ...
 │
-└── tests/                    # 单元测试（516个）
+└── tests/                    # 单元测试（582个）
     ├── test_database.py
     ├── test_engine.py
     ├── test_ai.py
@@ -319,6 +319,16 @@ ev-diag-tool/
 ---
 
 ## 版本历史
+
+### v3.5.1 — 三电诊断增强（2026-08-10）
+
+| # | 新增项 | 文件 |
+|---|------|------|
+| 1 | 向导候选码 → 「🎯 高疑似」标记：`three_electric_guide.json` 的候选码顺序作为高疑似提示，贯穿 worker → `diagnose_multiple` → AI prompt（新增「高疑似候选码」段）→ 结果面板（高疑似码排前并带标记，不依赖 AI 也有合理排序） | `src/ui/three_electric_panel.py`, `src/ui/result_panel.py`, `src/engine/diagnostic.py`, `src/ai/prompt_templates.py`, `src/ai/llm_client.py` |
+| 2 | 三电报告导出增强：symptom_context（诊断对象/现象/排查提示）进入 PDF/HTML/txt 报告的「症状描述」；聚合逻辑收敛为 `export_utils.aggregate_multi_knowledge`（主窗口与三电面板共用，修复原面板版丢严重度/原因/步骤的问题） | `src/ui/export_utils.py`, `src/ui/main_window.py`, `src/ui/three_electric_panel.py` |
+| 3 | 修复 `do_sync_db` 注释与实现不符：DB 无详情时不再用空值覆盖 CSV 原有详情（提取 `_merge_sync_rows` 纯函数） | `scripts/generate_ev_system_codes.py`, `tests/test_generate_ev_codes.py` |
+| 4 | Ollama 在线验证：`build_multi_diagnostic_prompt` 排序指令在 qwen2.5:7b 实测有效（高疑似码排前）；`verify_features.py` 45/45 全绿 | 文档同步 |
+| 5 | 打包验证：`pyinstaller` 生成 v3.5.1 exe 并可正常启动；文档/测试数同步（567 → 582） | `EV-Diag-Tool.spec`, `README.md`, `CLAUDE.md` |
 
 ### v3.5.0 — 三电诊断（2026-08-07）
 

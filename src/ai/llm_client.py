@@ -197,7 +197,8 @@ class LLMClient:
         codes: List[str],
         knowledge_list: List[Dict[str, Any]],
         vehicle_info: str = "",
-        additional_info: str = ""
+        additional_info: str = "",
+        priority_codes: Optional[List[str]] = None,
     ) -> str:
         """获取多故障码综合分析"""
         with self._provider_lock:
@@ -210,7 +211,8 @@ class LLMClient:
             results=knowledge_list,
             correlation_summary="",
             vehicle_info=vehicle_info,
-            additional_info=additional_info
+            additional_info=additional_info,
+            priority_codes=priority_codes,
         )
 
         try:

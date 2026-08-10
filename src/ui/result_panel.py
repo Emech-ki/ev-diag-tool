@@ -728,8 +728,17 @@ class ResultPanel(QWidget):
             </div>
             """
 
-        for i, r in enumerate(result.codes, 1):
-            kb = result.results[i-1].knowledge if i-1 < len(result.results) else None
+        # 显示顺序：向导标注的高疑似候选码（按标注顺序）排前，其余保持原顺序
+        priority = [c for c in getattr(result, "priority_codes", []) if c in result.codes]
+        display_order = priority + [c for c in result.codes if c not in priority]
+
+        for i, r in enumerate(display_order, 1):
+            idx = result.codes.index(r) if r in result.codes else -1
+            kb = result.results[idx].knowledge if idx >= 0 and idx < len(result.results) else None
+            is_priority = r in priority
+            priority_badge = ('<span style="font-size: 11px; color: #B71C1C; background-color: #FFCDD2; '
+                              'padding: 2px 8px; border-radius: 4px; margin-left: 8px;">🎯 高疑似</span>'
+                              if is_priority else "")
             if kb:
                 severity = kb.get('severity', 'medium')
                 severity_map = {'low': '低', 'medium': '中', 'high': '高', 'critical': '严重'}
@@ -739,7 +748,7 @@ class ResultPanel(QWidget):
                 html_out += f"""
                 <div style="border: 1px solid {CARD_BORDER}; border-radius: 8px; padding: 12px; margin-bottom: 12px;">
                     <div style="font-size: 14px; font-weight: bold; color: {PRIMARY}; margin-bottom: 8px;">
-                        {i}. {html.escape(r)}
+                        {i}. {html.escape(r)}{priority_badge}
                         <span style="font-size: 12px; color: {severity_color}; margin-left: 8px;">{html.escape(severity_label)}</span>
                     </div>
                     <div style="color: {TEXT_PRIMARY}; margin-bottom: 4px;">
@@ -761,7 +770,7 @@ class ResultPanel(QWidget):
                 html_out += f"""
                 <div style="border: 1px solid {CARD_BORDER}; border-radius: 8px; padding: 12px; margin-bottom: 12px;">
                     <div style="font-size: 14px; font-weight: bold; color: {TEXT_PRIMARY};">
-                        {i}. {html.escape(r)}
+                        {i}. {html.escape(r)}{priority_badge}
                     </div>
                     <div style="color: {TEXT_SECONDARY}; font-size: 12px;">
                         知识库中未收录此故障码

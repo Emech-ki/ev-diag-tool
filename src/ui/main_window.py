@@ -1098,46 +1098,8 @@ class MainWindow(QMainWindow):
     @staticmethod
     def _aggregate_knowledge(results: list, code: str = "") -> Optional[dict]:
         """将多个故障码的知识库信息聚合成单个导出用字典（用于多码导出）"""
-        systems = set()
-        descriptions = []
-        details = []
-        causes = []
-        steps = []
-        severity = "medium"
-        sev_order = {"low": 0, "medium": 1, "high": 2, "critical": 3}
-
-        for r in results:
-            kb = r.knowledge if hasattr(r, "knowledge") else getattr(r, "_knowledge", None)
-            if not kb:
-                continue
-            sys_name = kb.get("system", "")
-            if sys_name:
-                systems.add(sys_name)
-            if kb.get("description"):
-                descriptions.append(kb.get("description", ""))
-            if kb.get("detail"):
-                details.append(kb.get("detail", ""))
-            for c in kb.get("common_causes", []) or []:
-                causes.append(c)
-            for s in kb.get("diagnostic_steps", []) or []:
-                steps.append(s)
-            if sev_order.get(kb.get("severity", ""), -1) > sev_order.get(severity, -1):
-                severity = kb.get("severity", severity)
-
-        if not descriptions and not causes and not steps:
-            return None
-
-        return {
-            "code": code,
-            "system": ", ".join(sorted(systems)),
-            "code_type": "多故障码聚合",
-            "description": "；".join(descriptions),
-            "detail": "；".join(details),
-            "severity": severity,
-            "common_causes": causes,
-            "diagnostic_steps": steps,
-            "related_codes": [],
-        }
+        from src.ui.export_utils import aggregate_multi_knowledge
+        return aggregate_multi_knowledge(results, code=code)
 
     def _export_current_result(self):
         """导出当前诊断结果"""

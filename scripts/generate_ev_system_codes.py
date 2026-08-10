@@ -520,6 +520,24 @@ def do_merge():
     _print_summary(rows)
 
 
+def _merge_sync_rows(generated: list, by_code: dict, existing: dict) -> list:
+    """合并 DB → CSV 回写行：只有 DB 有详情时才用 DB 覆盖，否则保留 CSV 原值（纯逻辑，便于测试）"""
+    merged = {}
+    for r in generated:
+        code = r["code"]
+        if code in by_code:
+            db_row = dict(by_code[code])
+            if db_row.get("detail"):
+                merged[code] = db_row
+            else:
+                merged[code] = existing.get(code, r)
+        elif code in existing:
+            merged[code] = existing[code]
+        else:
+            merged[code] = r
+    return [merged[r["code"]] for r in generated]
+
+
 def do_sync_db():
     """把数据库中的 EV 详情回写到 CSV（CSV 与 DB 保持一致）"""
     import sqlite3
@@ -539,18 +557,7 @@ def do_sync_db():
 
     by_code = {r["code"]: r for r in rows}
     existing = _load_existing_rows()
-    merged = {}
-    for r in build_rows():
-        code = r["code"]
-        if code in by_code:
-            db_row = dict(by_code[code])
-            # 只有 DB 有详情时才用 DB 覆盖，否则保留 CSV 原值
-            merged[code] = db_row
-        elif code in existing:
-            merged[code] = existing[code]
-        else:
-            merged[code] = r
-    rows_out = [merged[r["code"]] for r in build_rows()]
+    rows_out = _merge_sync_rows(build_rows(), by_code, existing)
 
     OUT_PATH.parent.mkdir(parents=True, exist_ok=True)
     with open(str(OUT_PATH), "w", encoding="utf-8", newline="") as f:

@@ -1,5 +1,5 @@
 """
-三电诊断 UI 测试（v3.5.0，offscreen）
+三电诊断 UI 测试（v3.5.1，offscreen）
 
 覆盖:
 - ThreeElectricPanel 初始化（子系统按钮/子页堆栈/默认选中）
@@ -184,6 +184,68 @@ class TestElectricSystemPageWizard(unittest.TestCase):
         html = self.page.result_panel.knowledge_browser.toHtml()
         self.assertIn("诊断对象", html)
         self.assertIn("故障现象", html)
+
+    @patch("src.ui.three_electric_panel.ThreeElectricDiagnoseWorker")
+    def test_start_diagnosis_passes_priority_codes(self, MockWorker):
+        """开始诊断时把向导候选码顺序作为高疑似标记传给 worker"""
+        group = self.page._guide["symptom_groups"][0]
+        option = group["options"][0]
+        self.page._show_option(group, option)
+        self.page._start_diagnosis(option["candidate_codes"])
+        priority = MockWorker.call_args[1]["priority_codes"]
+        self.assertEqual(priority, option["candidate_codes"])
+
+    @patch("src.ui.three_electric_panel.ThreeElectricDiagnoseWorker")
+    def test_result_shows_priority_badge(self, MockWorker):
+        """结果面板为向导高疑似候选码显示 🎯 高疑似 标记"""
+        group = self.page._guide["symptom_groups"][0]
+        option = group["options"][0]
+        self.page._show_option(group, option)
+        self.page._start_diagnosis(option["candidate_codes"])
+
+        result = self.page.engine.diagnose_multiple(
+            codes=option["candidate_codes"], additional_info="ctx",
+            priority_codes=option["candidate_codes"],
+        )
+        self.page._on_diagnose_finished(result)
+        html = self.page.result_panel.knowledge_browser.toHtml()
+        self.assertIn("高疑似", html)
+        self.assertIn(option["candidate_codes"][0], html)
+
+    @patch("PyQt6.QtWidgets.QFileDialog")
+    @patch("src.ui.export_utils.export_as_html")
+    def test_export_passes_symptom_context(self, mock_export, MockDialog):
+        """三电报告导出把症状上下文作为 symptoms 传入（对症下药贯穿导出链路）"""
+        import tempfile
+        from unittest.mock import MagicMock
+        from PyQt6.QtWidgets import QMessageBox
+
+        tmp_dir = tempfile.gettempdir()
+        MockDialog.getSaveFileName.return_value = (
+            os.path.join(tmp_dir, "三电报告.html"), "HTML 文件 (*.html)"
+        )
+        mock_export.return_value = "<html>report</html>"
+
+        QMessageBox.information = MagicMock()
+        QMessageBox.warning = MagicMock()
+
+        group = self.page._guide["symptom_groups"][0]
+        option = group["options"][0]
+        self.page._show_option(group, option)
+        ctx = self.page._build_symptom_context()
+        result = self.page.engine.diagnose_multiple(
+            codes=option["candidate_codes"], additional_info=ctx,
+            priority_codes=option["candidate_codes"],
+        )
+        self.page.result_panel.show_multi_code_result(result)
+
+        self.page._on_export()
+
+        self.assertEqual(mock_export.call_count, 1)
+        kwargs = mock_export.call_args[1]
+        self.assertIn("故障现象", kwargs.get("symptoms", ""))
+        self.assertEqual(kwargs["symptoms"], ctx)
+        self.assertIsNotNone(kwargs.get("knowledge"))
 
     @patch("src.ui.three_electric_panel.ThreeElectricDiagnoseWorker")
     def test_start_diagnosis_switches_to_result_tab(self, MockWorker):

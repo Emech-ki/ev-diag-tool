@@ -416,6 +416,23 @@ class TestDiagnosticEngine(unittest.TestCase):
         self.assertEqual(result2.symptom_context, ctx)
         self.assertFalse(result2.has_ai())
 
+    def test_diagnose_multiple_priority_codes(self):
+        """多码诊断携带高疑似候选码 → 存入结果并透传给 AI"""
+        self.mock_llm.is_available.return_value = True
+        self.mock_llm.get_multi_code_analysis.return_value = "综合建议"
+        priority = ["EV-BMS-006", "EV-BMS-015"]
+        result = self.engine.diagnose_multiple(["EV-BMS-006", "EV-BMS-015", "EV-BMS-041"],
+                                               additional_info="电量跳变", priority_codes=priority)
+        self.assertEqual(result.priority_codes, priority)
+        called = self.mock_llm.get_multi_code_analysis.call_args
+        self.assertEqual(called[1]["priority_codes"], priority)
+
+    def test_diagnose_multiple_priority_codes_default_empty(self):
+        """未指定高疑似候选码时默认为空列表"""
+        self.mock_llm.is_available.return_value = False
+        result = self.engine.diagnose_multiple(["P0300"])
+        self.assertEqual(result.priority_codes, [])
+
     def test_diagnose_multiple_ai_exception(self):
         """AI 综合分析抛异常 → 降级"""
         self.mock_llm.is_available.return_value = True

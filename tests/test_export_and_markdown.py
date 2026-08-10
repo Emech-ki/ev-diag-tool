@@ -12,7 +12,7 @@ sys.path.insert(0, PROJECT_ROOT)
 from src.ui.markdown_renderer import md_to_html, md_to_plain_text, StreamMarkdownRenderer
 from src.ui.export_utils import (
     _parse_json_field, _parse_related_codes, _get_severity_label,
-    export_as_text, export_as_html, export_as_pdf
+    export_as_text, export_as_html, export_as_pdf, aggregate_multi_knowledge
 )
 
 
@@ -220,9 +220,52 @@ class TestGetSeverityLabel(unittest.TestCase):
         self.assertEqual(_get_severity_label("unknown"), "unknown")
 
 
+class TestAggregateMultiKnowledge(unittest.TestCase):
+    """aggregate_multi_knowledge 多码聚合测试"""
+
+    def _kb(self, **kw):
+        base = {"code": "", "system": "P", "description": "desc", "detail": "",
+                "severity": "medium", "common_causes": [], "diagnostic_steps": [],
+                "related_codes": []}
+        base.update(kw)
+        return base
+
+    def test_merges_descriptions_and_highest_severity(self):
+        r1 = type("_R", (), {"knowledge": self._kb(
+            description="失火", severity="high", system="P",
+            common_causes=["火花塞"], diagnostic_steps=["检查火花塞"])})()
+        r2 = type("_R", (), {"knowledge": self._kb(
+            description="混合气稀", severity="medium", system="P",
+            common_causes=["真空泄漏"], diagnostic_steps=["检查真空"])})()
+        agg = aggregate_multi_knowledge([r1, r2], code="P0300, P0171")
+        self.assertEqual(agg["code"], "P0300, P0171")
+        self.assertIn("失火", agg["description"])
+        self.assertIn("混合气稀", agg["description"])
+        self.assertEqual(agg["severity"], "high")
+        self.assertIn("火花塞", agg["common_causes"])
+        self.assertIn("真空泄漏", agg["common_causes"])
+        self.assertEqual(agg["code_type"], "多故障码聚合")
+
+    def test_ignores_none_knowledge(self):
+        r1 = type("_R", (), {"knowledge": None})()
+        r2 = type("_R", (), {"knowledge": self._kb(description="有效")})()
+        agg = aggregate_multi_knowledge([r1, r2])
+        self.assertIsNotNone(agg)
+        self.assertIn("有效", agg["description"])
+
+    def test_returns_none_when_all_empty(self):
+        r1 = type("_R", (), {"knowledge": None})()
+        r2 = type("_R", (), {"knowledge": None})()
+        self.assertIsNone(aggregate_multi_knowledge([r1, r2]))
+
+    def test_supports_underscore_knowledge(self):
+        r = type("_R", (), {"_knowledge": self._kb(description="后备字段")})()
+        agg = aggregate_multi_knowledge([r])
+        self.assertIn("后备字段", agg["description"])
+
+
 class TestExportAsText(unittest.TestCase):
     """export_as_text 测试"""
-
     def test_basic_export(self):
         result = export_as_text(code="P0300")
         self.assertIn("P0300", result)

@@ -307,6 +307,7 @@ class PromptTemplates:
         correlation_summary: str,
         vehicle_info: str = "",
         additional_info: str = "",
+        priority_codes: Optional[List[str]] = None,
     ) -> str:
         """
         构建多故障码综合诊断提示词
@@ -316,6 +317,7 @@ class PromptTemplates:
         - 包含关联性分析结论
         - 要求 LLM 从系统性角度分析共同根因
         """
+        priority = list(priority_codes or [])
         # 严重程度取最高的
         max_severity = "low"
         severity_order = {"low": 0, "medium": 1, "high": 2, "critical": 3}
@@ -357,6 +359,13 @@ class PromptTemplates:
             prompt += f"## 车型信息\n{vehicle_info}\n\n"
         if additional_info:
             prompt += f"## 已报告的症状（对症下药的关键）\n{additional_info}\n\n"
+
+        # 向导标注的高疑似候选码：把 guide 顺序作为「高疑似」提示传给 AI
+        if priority:
+            prompt += "## 高疑似候选码（来自三电诊断向导，按疑似度从高到低）\n"
+            for i, code in enumerate(priority, 1):
+                prompt += f"{i}. {code}\n"
+            prompt += "排序时可优先参考此顺序，但请结合症状与知识库信息做最终判断。\n\n"
 
         # 安全提醒
         if is_critical:

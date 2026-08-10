@@ -294,6 +294,33 @@ class TestPromptTemplates(unittest.TestCase):
         self.assertNotIn("候选码可能性排序", prompt)
         self.assertIn("故障码关联性判断", prompt)
 
+    def test_multi_prompt_priority_codes(self):
+        """高疑似候选码 → prompt 含「高疑似候选码」提示段，无症状时也可用"""
+        from src.ai.prompt_templates import PromptTemplates
+
+        templates = PromptTemplates()
+        prompt = templates.build_multi_diagnostic_prompt(
+            codes=["EV-BMS-006", "EV-BMS-015", "EV-BMS-041"],
+            results=[{"description": "x", "severity": "medium", "system": "BMS"}],
+            correlation_summary="",
+            priority_codes=["EV-BMS-006", "EV-BMS-015"],
+        )
+        self.assertIn("高疑似候选码", prompt)
+        self.assertIn("EV-BMS-006", prompt)
+        self.assertIn("疑似度从高到低", prompt)
+
+    def test_multi_prompt_without_priority(self):
+        """未指定高疑似候选码时不出现提示段"""
+        from src.ai.prompt_templates import PromptTemplates
+
+        templates = PromptTemplates()
+        prompt = templates.build_multi_diagnostic_prompt(
+            codes=["P0300"],
+            results=[{"description": "失火", "severity": "medium", "system": "P"}],
+            correlation_summary="",
+        )
+        self.assertNotIn("高疑似候选码", prompt)
+
     def test_multi_prompt_critical_severity(self):
         """测试多码中存在 critical 时取最高严重度"""
         from src.ai.prompt_templates import PromptTemplates

@@ -46,6 +46,60 @@ def _get_severity_label(severity: str) -> str:
     return {"low": "低", "medium": "中", "high": "高", "critical": "严重"}.get(severity, severity)
 
 
+def aggregate_multi_knowledge(results: list, code: str = "") -> Optional[Dict[str, Any]]:
+    """
+    将多个故障码的知识库信息聚合为单个导出用字典（用于多码导出）
+
+    Args:
+        results: DiagnosticResult 对象列表（需有 .knowledge 属性）
+        code: 聚合故障码字符串（如 "P0300, P0171"）
+
+    Returns:
+        聚合后的知识库字典；无任何有效信息时返回 None
+    """
+    systems = set()
+    descriptions = []
+    details = []
+    causes = []
+    steps = []
+    severity = "medium"
+    sev_order = {"low": 0, "medium": 1, "high": 2, "critical": 3}
+
+    for r in results:
+        kb = r.knowledge if hasattr(r, "knowledge") else getattr(r, "_knowledge", None)
+        if not kb:
+            continue
+        sys_name = kb.get("system", "")
+        if sys_name:
+            systems.add(sys_name)
+        if kb.get("description"):
+            descriptions.append(kb.get("description", ""))
+        if kb.get("detail"):
+            details.append(kb.get("detail", ""))
+        for c in kb.get("common_causes", []) or []:
+            causes.append(c)
+        for s in kb.get("diagnostic_steps", []) or []:
+            steps.append(s)
+        if sev_order.get(kb.get("severity", ""), -1) > sev_order.get(severity, -1):
+            severity = kb.get("severity", severity)
+
+    if not descriptions and not causes and not steps:
+        return None
+
+    return {
+        "code": code,
+        "system": ", ".join(sorted(systems)),
+        "code_type": "多故障码聚合",
+        "description": "；".join(descriptions),
+        "detail": "；".join(details),
+        "severity": severity,
+        "common_causes": causes,
+        "diagnostic_steps": steps,
+        "related_codes": [],
+    }
+
+
+
 def export_as_text(
     code: str,
     knowledge: Optional[Dict[str, Any]] = None,

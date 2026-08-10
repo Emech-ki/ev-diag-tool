@@ -30,16 +30,22 @@ class ThreeElectricDiagnoseWorker(QThread):
     finished = pyqtSignal(object)
     error = pyqtSignal(str)
 
-    def __init__(self, engine: DiagnosticEngine, codes: list, symptom_context: str = ""):
+    def __init__(self, engine: DiagnosticEngine, codes: list, symptom_context: str = "",
+                 priority_codes: Optional[list] = None):
         super().__init__()
         self.engine = engine
         self.codes = codes
         self.symptom_context = symptom_context
+        self.priority_codes = list(priority_codes or [])
 
     def run(self):
         try:
             self.progress.emit(f"正在分析 {len(self.codes)} 个故障码...")
-            result = self.engine.diagnose_multiple(codes=self.codes, additional_info=self.symptom_context)
+            result = self.engine.diagnose_multiple(
+                codes=self.codes,
+                additional_info=self.symptom_context,
+                priority_codes=self.priority_codes,
+            )
             self.finished.emit(result)
         except Exception as e:
             self.error.emit(str(e))
@@ -407,7 +413,12 @@ class ElectricSystemPage(QWidget):
         self._stop_worker()
         self._set_busy(True)
         self._inner_tabs.setCurrentIndex(self._RESULT_TAB_INDEX)
-        self.worker = ThreeElectricDiagnoseWorker(self.engine, codes, self._build_symptom_context())
+        # 向导候选码顺序即「高疑似」标记：当前所选选项的候选码排前，其余自然靠后
+        priority = self._current_option.get("candidate_codes", []) if self._current_option else []
+        self.worker = ThreeElectricDiagnoseWorker(
+            self.engine, codes, self._build_symptom_context(),
+            priority_codes=priority,
+        )
         self.worker.progress.connect(self._on_progress)
         self.worker.finished.connect(self._on_diagnose_finished)
         self.worker.error.connect(self._on_diagnose_error)
@@ -469,7 +480,7 @@ class ElectricSystemPage(QWidget):
     def _on_export(self):
         """导出内嵌结果面板当前诊断结果"""
         from PyQt6.QtWidgets import QFileDialog
-        from src.ui.export_utils import export_as_text, export_as_html, export_as_pdf
+        from src.ui.export_utils import export_as_text, export_as_html, export_as_pdf, aggregate_multi_knowledge
 
         result = self.result_panel.get_current_result()
         if not result:
@@ -478,14 +489,16 @@ class ElectricSystemPage(QWidget):
 
         if isinstance(result, MultiCodeDiagnosticResult):
             code = ", ".join(result.codes)
-            knowledge = self._aggregate_knowledge(result)
+            knowledge = aggregate_multi_knowledge(result.results, code=code)
             ai_suggestion = result.ai_suggestion
             timestamp = result.timestamp
+            symptoms = result.symptom_context
         else:
             code = result.code
             knowledge = result.knowledge
             ai_suggestion = result.ai_suggestion
             timestamp = result.timestamp
+            symptoms = ""
 
         default_name = f"三电诊断报告_{code}_{timestamp.replace(':', '-').replace(' ', '_')}"
 
@@ -507,7 +520,7 @@ class ElectricSystemPage(QWidget):
                     code=code, knowledge=knowledge,
                     ai_suggestion=ai_suggestion,
                     vehicle_info=self._get_vehicle_info(),
-                    symptoms="", timestamp=timestamp,
+                    symptoms=symptoms, timestamp=timestamp,
                 )
                 with open(file_path, "wb") as f:
                     f.write(content)
@@ -518,7 +531,7 @@ class ElectricSystemPage(QWidget):
                     code=code, knowledge=knowledge,
                     ai_suggestion=ai_suggestion,
                     vehicle_info=self._get_vehicle_info(),
-                    symptoms="", timestamp=timestamp,
+                    symptoms=symptoms, timestamp=timestamp,
                 )
                 with open(file_path, "w", encoding="utf-8") as f:
                     f.write(content)
@@ -529,7 +542,7 @@ class ElectricSystemPage(QWidget):
                     code=code, knowledge=knowledge,
                     ai_suggestion=ai_suggestion,
                     vehicle_info=self._get_vehicle_info(),
-                    symptoms="", timestamp=timestamp,
+                    symptoms=symptoms, timestamp=timestamp,
                 )
                 with open(file_path, "w", encoding="utf-8") as f:
                     f.write(content)
@@ -539,28 +552,6 @@ class ElectricSystemPage(QWidget):
 
     def _get_vehicle_info(self) -> str:
         return ""
-
-    @staticmethod
-    def _aggregate_knowledge(result: MultiCodeDiagnosticResult):
-        """合并多码知识库摘要（对齐主窗口 _aggregate_knowledge 风格）"""
-        import json
-        if not result.results:
-            return None
-        first = result.results[0]
-        if not first.knowledge:
-            return None
-        codes = [r.code for r in result.results]
-        desc = "；".join(
-            f"{r.code}: {r.knowledge.get('description', '')}"
-            for r in result.results if r.knowledge
-        )
-        return {
-            "code": ", ".join(codes),
-            "description": desc,
-            "severity": "medium",
-            "common_causes": [],
-            "diagnostic_steps": [],
-        }
 
     # ── 样式辅助 ──
 
