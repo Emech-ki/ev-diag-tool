@@ -27,18 +27,24 @@ THREE_ELECTRIC = {
         "expert_name": "电池系统专家",
         "icon": "🔋",
         "systems": ("EV-BMS", "EV-HV", "EV-OBC", "EV-DCDC", "EV-THERMAL"),
+        "keywords": ("电池", "bms", "单体", "电压", "绝缘", "充电", "soc", "soh",
+                     "均衡", "接触器", "预充", "冷却", "热管理", "温度", "热失控"),
     },
     "motor": {
         "name": "电机系统",
         "expert_name": "电机驱动专家",
         "icon": "⚙️",
         "systems": ("EV-MOTOR", "EV-REGEN"),
+        "keywords": ("电机", "扭矩", "旋变", "电机位置", "驱动", "三相", "逆变器",
+                     "mcu", "转速", "再生", "回收"),
     },
     "vcu": {
         "name": "电控系统",
         "expert_name": "电控系统专家",
         "icon": "🖥️",
         "systems": ("EV-VCU",),
+        "keywords": ("电控", "整车", "上下电", "上电", "下电", "网关", "网络", "can",
+                     "钥匙", "挡位", "唤醒", "休眠", "防盗"),
     },
 }
 
@@ -85,6 +91,27 @@ def get_expert_name(subsystem: str) -> str:
     """返回子系统对应的专家展示名（未匹配则返回通用诊断专家）"""
     info = THREE_ELECTRIC.get(subsystem)
     return info["expert_name"] if info else GENERAL_EXPERT_NAME
+
+
+def get_expert_keywords(subsystem: str) -> tuple:
+    """返回子系统的诊断关键词元组（未匹配返回空元组）"""
+    info = THREE_ELECTRIC.get(subsystem)
+    return tuple(info.get("keywords", ())) if info else ()
+
+
+def match_keywords(text: str) -> Optional[str]:
+    """
+    按关键词把文本路由到三电子系统（battery/motor/vcu），未命中返回 None
+
+    关键词列表是 THREE_ELECTRIC 的 keywords 单一真源；命中优先级固定为 battery → motor → vcu。
+    """
+    if not text:
+        return None
+    lowered = text.lower()
+    for sub in ("battery", "motor", "vcu"):
+        if any(kw in lowered for kw in get_expert_keywords(sub)):
+            return sub
+    return None
 
 
 def load_three_electric_guide() -> dict:

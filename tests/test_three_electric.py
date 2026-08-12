@@ -83,6 +83,34 @@ class TestThreeElectricMapping(unittest.TestCase):
         self.assertEqual(three_electric.get_expert_name("vcu"), "电控系统专家")
         self.assertEqual(three_electric.get_expert_name("nope"), "通用诊断专家")
 
+    def test_get_expert_keywords_present(self):
+        """每个子系统都有诊断关键词（专家路由消息匹配的单一真源）"""
+        for sub in ("battery", "motor", "vcu"):
+            self.assertTrue(three_electric.get_expert_keywords(sub),
+                            f"{sub} 缺少关键词")
+        self.assertEqual(three_electric.get_expert_keywords("nope"), ())
+
+    def test_keywords_route_match(self):
+        """关键词消息路由：电池/电机/电控关键词 → 对应子系统"""
+        cases = {
+            "电池充不进电": "battery",
+            "电池单体电压高": "battery",
+            "绝缘报警": "battery",
+            "充电很慢": "battery",
+            "电机异响": "motor",
+            "扭矩传感器故障": "motor",
+            "旋变信号异常": "motor",
+            "整车无法上电": "vcu",
+            "挡位挂不上": "vcu",
+            "CAN 网络丢失": "vcu",
+        }
+        for msg, expected in cases.items():
+            self.assertEqual(three_electric.match_keywords(msg), expected, msg)
+
+    def test_keywords_route_unknown_general(self):
+        self.assertIsNone(three_electric.match_keywords(""))
+        self.assertIsNone(three_electric.match_keywords("冷车启动抖动"))
+
 
 class TestThreeElectricGuide(unittest.TestCase):
     """向导 JSON 数据完整性"""

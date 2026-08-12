@@ -18,7 +18,10 @@ from typing import Optional, Dict, Any, List, Callable, Iterator
 logger = logging.getLogger(__name__)
 
 from src.engine.knowledge_base import KnowledgeBase
-from src.engine.three_electric import get_subsystem_for_system, get_expert_name
+from src.engine.three_electric import (
+    get_subsystem_for_system, get_expert_name,
+    get_expert_keywords, match_keywords,
+)
 from src.ai.llm_client import LLMClient
 from src.ai.providers import StreamEvent
 from src.ai.tools import ToolRegistry
@@ -712,10 +715,9 @@ class DiagnosticAgent:
                     if subsystem:
                         return subsystem
 
-                    # P0Axx 码按描述关键词细分
+                    # P0Axx 码按描述关键词细分（电机关键词单一真源）
                     if code_upper.startswith("P0A"):
-                        motor_desc = ["扭矩传感器", "旋变", "电机位置", "逆变器"]
-                        if any(kw in desc for kw in motor_desc):
+                        if any(kw in desc for kw in get_expert_keywords("motor")):
                             return "motor"
                         # 其他 P0Axx 默认电池（电池冷却、高压系统等）
                         return "battery"
@@ -726,21 +728,11 @@ class DiagnosticAgent:
             except Exception as e:
                 logger.debug(f"Expert selection failed: {e}")
 
-        # 2. 按用户消息关键词匹配（仅当没有故障码时）
+        # 2. 按用户消息关键词匹配（仅当没有故障码时，关键词单一真源）
         if not code_upper:
-            msg = user_message.lower()
-            battery_keywords = ["电池", "bms", "单体", "电压", "绝缘", "充电", "soc", "soh",
-                                "均衡", "接触器", "预充", "冷却", "热管理", "温度", "热失控"]
-            if any(kw in msg for kw in battery_keywords):
-                return "battery"
-            motor_keywords = ["电机", "扭矩", "旋变", "驱动", "三相", "逆变器", "mcu",
-                              "转速", "再生", "回收"]
-            if any(kw in msg for kw in motor_keywords):
-                return "motor"
-            vcu_keywords = ["电控", "整车", "上下电", "上电", "下电", "网关", "网络", "can",
-                            "钥匙", "挡位", "唤醒", "休眠", "防盗"]
-            if any(kw in msg for kw in vcu_keywords):
-                return "vcu"
+            matched = match_keywords(user_message)
+            if matched:
+                return matched
 
         return "general"
 
