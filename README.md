@@ -10,8 +10,8 @@
 
 | 指标 | 数值 |
 |------|------|
-| **版本** | v3.5.1 |
-| **测试** | 587 个全部通过 |
+| **版本** | v3.6.0 |
+| **测试** | 598 个全部通过 |
 | **覆盖率** | 75%（逻辑层 85%+） |
 | **故障码** | 9129 条（100% 中文） |
 | **详细信息覆盖** | EV 系统码 400 条 100% 有详情；P/B/C/U 部分覆盖（以当前 DB 为准） |
@@ -84,7 +84,7 @@ python src/main.py
 ```bash
 python scripts/seed_db.py    # 初始化数据库（含新能源码+车型数据）
 python src/main.py           # 运行程序
-pytest tests/                # 运行测试（587个测试）
+pytest tests/                # 运行测试（598个测试）
 ```
 
 ### 打包成 exe
@@ -297,7 +297,7 @@ ev-diag-tool/
 │   ├── batch_enhance_codes.py # 批量增强脚本
 │   └── ...
 │
-└── tests/                    # 单元测试（587个）
+└── tests/                    # 单元测试（598个）
     ├── test_database.py
     ├── test_engine.py
     ├── test_ai.py
@@ -319,6 +319,17 @@ ev-diag-tool/
 ---
 
 ## 版本历史
+
+### v3.6.0 — 三电置信度与频次排序增强（2026-08-12）
+
+| # | 新增项 | 文件 |
+|---|------|------|
+| 1 | 向导候选码显式置信度 `weight`：`three_electric_guide.json` 候选码改为对象式 `{code, weight}`（0-100），新增 `get_option_codes`/`get_option_weights` 单一解析；weight 贯穿 worker(`priority_weights`) → `diagnose_multiple` → `MultiCodeDiagnosticResult.priority_weights` → AI prompt（渲染「置信度 x%」）→ 结果面板「🎯 高疑似 x%」徽标。顺序仅作 tie-breaker | `data/seed/three_electric_guide.json`, `src/engine/three_electric.py`, `src/ui/three_electric_panel.py`, `src/engine/diagnostic.py`, `src/ai/llm_client.py`, `src/ai/prompt_templates.py`, `src/ui/result_panel.py` |
+| 2 | `obd_codes` 新增 `frequency` 列（0-100 确定性 seed，EV 系统码由生成脚本稳定哈希填充，老库 `_migrate_add_column` 自动补列）；`build_overview` 高频码排序 = severity 主键 + frequency 次键 | `src/database/schema.py`, `src/database/db_manager.py`, `scripts/generate_ev_system_codes.py`, `scripts/seed_db.py`, `data/seed/ev_system_codes.csv`, `src/engine/three_electric.py` |
+| 3 | P0Axx/消息关键词收敛单一真源：`THREE_ELECTRIC` 各子系统 `keywords` + `get_expert_keywords`/`match_keywords`；`_select_expert` 删除硬编码 battery/motor/vcu 关键词与 P0A 电机描述词 | `src/engine/three_electric.py`, `src/ai/agent.py` |
+| 4 | `dist/` 历史 exe 归档：旧版本移入 `dist/archive/`，仅保留最新版 | `dist/` |
+| 5 | 测试 587 → 598（weight 解析/透传/渲染、frequency 迁移/排序、关键词收敛）；文档/spec/版本同步 v3.6.0 | `tests/`, `src/version.py`, `EV-Diag-Tool.spec`, `README.md`, `CLAUDE.md` |
+| 6 | 在线验证 + 打包：`verify_features.py` 45/45 全绿（Ollama qwen2.5:7b）；`pyinstaller` 生成 v3.6.0 exe 冒烟启动通过 | `scripts/verify_features.py`, `EV-Diag-Tool.spec`, `dist/` |
 
 ### v3.5.1 — 三电诊断增强（2026-08-10）
 

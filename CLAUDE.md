@@ -39,7 +39,7 @@ python scripts/seed_db.py    # 初始化数据库（9129 码 + 45 车型）
 python scripts/synthesize_ev_details.py   # EV 码详情确定性生成（无需 Ollama）
 python scripts/generate_ev_system_codes.py --sync-db   # DB 详情回写 CSV
 python src/main.py           # 运行程序
-pytest tests/                # 587 个测试
+pytest tests/                # 598 个测试
 pytest tests/ --cov=src --cov-report=term-missing  # 覆盖率 75%（逻辑层 85%+）
 python scripts/verify_features.py   # 端到端验证（需 Ollama 在线，45 项）
 ```
@@ -51,9 +51,11 @@ python scripts/verify_features.py   # 端到端验证（需 Ollama 在线，45 �
 - **方案B**：LLM 增强诊断（故障码+车型+描述 → 结构化建议）
 - **方案C**：AI Agent，ReAct 循环 + Tool Calling，专家路由（电池/电机/电控/通用）
 - **多端点**：`.env` 中 `OPENAI_ENDPOINT_N_{NAME,URL,KEY,MODEL}`，品牌栏一键切换
-- **三电高疑似链路（v3.5.1）**：向导候选码顺序 = `priority_codes`，贯穿 `ThreeElectricDiagnoseWorker` → `diagnose_multiple(priority_codes=)` → `MultiCodeDiagnosticResult.priority_codes` → AI prompt「高疑似候选码」段 → 结果面板「🎯 高疑似」徽标排前（不依赖 AI 排序）。修改向导 JSON 顺序即改变高疑似优先级
+- **三电高疑似链路（v3.5.1+）**：向导候选码显式置信度 `weight`（0-100）为疑似度主键，顺序作 tie-breaker。`get_option_codes(option)` 按 weight 降序取码、`get_option_weights(option)` 取 `{code: weight}`，贯穿 `ThreeElectricDiagnoseWorker(priority_codes, priority_weights)` → `diagnose_multiple(priority_codes=, priority_weights=)` → `MultiCodeDiagnosticResult.priority_codes/priority_weights` → AI prompt「高疑似候选码」段（渲染置信度%）→ 结果面板「🎯 高疑似 x%」徽标排前（不依赖 AI 排序）。修改向导 JSON 的 weight 即改变高疑似优先级
 - **域映射单一真源**：`src/engine/three_electric.py` 的 `THREE_ELECTRIC` 是唯一权威——系统码前缀→子系统(battery/motor/vcu)→专家名。`_select_expert` 经 `get_subsystem_for_system()` 路由，`agent` 专家名经 `get_expert_name()`，`expert_context.json` domains 有测试强制与之一致（`test_expert_domains_match_three_electric`）。**新增 EV 系统码时只需改 `THREE_ELECTRIC` + `expert_context.json`，测试会兜底一致性**
 - **导出聚合共用**：多码导出统一走 `export_utils.aggregate_multi_knowledge`（`main_window._aggregate_knowledge` 与三电面板 `_on_export` 均委托它）；导出 `symptoms=` 传 `result.symptom_context`
+- **概览频次加权（v3.6.0）**：`obd_codes.frequency`（0-100，确定性 seed）作为高频信号；`build_overview` 的 common_codes 排序 = severity 主键 + `-frequency` 次键。EV 系统码频率由 `generate_ev_system_codes.py` 确定性生成（稳定哈希，勿用内置 `hash()`），老库经 `_ensure_tables._migrate_add_column` 自动补列
+- **专家关键词单一真源（v3.6.0）**：`THREE_ELECTRIC` 各子系统 `keywords` 是消息/描述路由的唯一权威；`get_expert_keywords(subsystem)` / `match_keywords(text)`（battery→motor→vcu 优先级）。`_select_expert` 的 P0A 描述细分与消息关键词路由均走此单源
 
 ## 代码规范（必须遵守）
 
@@ -76,8 +78,8 @@ python scripts/verify_features.py   # 端到端验证（需 Ollama 在线，45 �
 
 ## 当前状态
 
-- **版本**：v3.5.1（三电诊断增强）
-- **测试**：587 个全部通过（含 UI 测试、export_as_pdf 4 个）
+- **版本**：v3.6.0（三电置信度与频次排序增强）
+- **测试**：598 个全部通过（含 UI 测试、export_as_pdf 4 个）
 - **数据库**：9129 故障码（EV 系统码 400 条 100% 有详情，各系统 50 条；P/B/C/U 详情部分覆盖）+ 45 车型
 - **AI 配置**：`.env` 指向本地 Ollama `qwen2.5:7b`
 - **打包**：`pyinstaller EV-Diag-Tool.spec --noconfirm`（spec 内改 name 为当前版本号）
