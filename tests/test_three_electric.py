@@ -243,6 +243,16 @@ class TestThreeElectricOverview(unittest.TestCase):
         for r in ov["common_codes"]:
             self.assertIn(r["code"], real)
 
+    def test_common_codes_severe_first_then_frequency(self):
+        """高频码排序：主键严重度，次键频次降序"""
+        ov = three_electric.build_overview(self.kb, "battery")
+        sev_order = {"critical": 0, "high": 1, "medium": 2, "low": 3}
+        sorted_codes = ov["common_codes"]
+        for prev, cur in zip(sorted_codes, sorted_codes[1:]):
+            sp, sc = sev_order.get(prev["severity"], 9), sev_order.get(cur["severity"], 9)
+            fp, fc = int(prev.get("frequency", 0) or 0), int(cur.get("frequency", 0) or 0)
+            self.assertTrue((sp, -fp) <= (sc, -fc), f"{prev['code']} 应排在 {cur['code']} 前")
+
 
 class TestThreeElectricWorker(unittest.TestCase):
     """ThreeElectricDiagnoseWorker 多码诊断（stub LLM）"""

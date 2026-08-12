@@ -20,6 +20,7 @@ CREATE TABLE IF NOT EXISTS obd_codes (
     -- 辅助字段
     related_codes    TEXT    DEFAULT '',             -- 相关故障码: "P0301,P0302"
     symptoms         TEXT    DEFAULT '[]',           -- JSON数组: ["现象1", "现象2"]
+    frequency        INTEGER DEFAULT 0,              -- 出现频次（KB 高频加权，供概览排序）
 
     created_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP

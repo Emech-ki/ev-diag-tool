@@ -19,6 +19,21 @@ from src.database.schema import (
 )
 
 
+def _cleanup_dir(path):
+    """清空并删除临时目录（含 WAL/SHM 侧车文件）"""
+    if not os.path.isdir(path):
+        return
+    for name in os.listdir(path):
+        try:
+            os.remove(os.path.join(path, name))
+        except OSError:
+            pass
+    try:
+        os.rmdir(path)
+    except OSError:
+        pass
+
+
 class TestDatabaseManager(unittest.TestCase):
     """DatabaseManager 测试"""
 
@@ -246,6 +261,74 @@ class TestDatabaseManager(unittest.TestCase):
         self.assertEqual(len(results), 2)
         self.assertIn("P0300", results)
         self.assertIn("B1100", results)
+
+    def test_frequency_column_migrates_on_old_table(self):
+        """老库缺 frequency 列时自动迁移补列（默认 0）"""
+        from src.database.db_manager import DatabaseManager
+
+        legacy_dir = tempfile.mkdtemp()
+        legacy_db = os.path.join(legacy_dir, "legacy.db")
+        legacy_table = """
+        CREATE TABLE obd_codes (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            code        TEXT NOT NULL,
+            system      TEXT NOT NULL,
+            code_type   TEXT DEFAULT 'generic',
+            description TEXT NOT NULL,
+            detail      TEXT DEFAULT '',
+            severity    TEXT DEFAULT 'medium',
+            common_causes    TEXT DEFAULT '[]',
+            diagnostic_steps TEXT DEFAULT '[]',
+            related_codes    TEXT DEFAULT '',
+            symptoms         TEXT DEFAULT '[]'
+        )
+        """
+        with sqlite3.connect(legacy_db) as conn:
+            conn.execute(legacy_table)
+            conn.execute("INSERT INTO obd_codes (code, system, description) VALUES ('EV-X-001', 'EV-X', 'x')")
+
+        DatabaseManager._instance = None
+        DatabaseManager._instance_lock = __import__('threading').Lock()
+        db = DatabaseManager(db_path=legacy_db)
+        conn = db.get_connection()
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(obd_codes)")}
+        conn.close()
+        self.assertIn("frequency", cols)
+        DatabaseManager._instance = None
+        with sqlite3.connect(legacy_db) as conn:
+            row = conn.execute("SELECT frequency FROM obd_codes WHERE code='EV-X-001'").fetchone()
+        self.assertEqual(row[0], 0)
+        _cleanup_dir(legacy_dir)
+
+    def test_get_codes_by_system_prefix_includes_frequency(self):
+        """系统前缀查询返回频次字段，未设置时为 0"""
+        from src.database.db_manager import DatabaseManager
+
+        temp_dir = tempfile.mkdtemp()
+        custom_db = os.path.join(temp_dir, "test.db")
+        conn = sqlite3.connect(custom_db)
+        conn.execute(CREATE_TABLE_OBD_CODES)
+        conn.commit()
+        conn.close()
+
+        DatabaseManager._instance = None
+        DatabaseManager._instance_lock = __import__('threading').Lock()
+        db = DatabaseManager(db_path=custom_db)
+        conn = db.get_connection()
+        conn.execute(
+            "INSERT INTO obd_codes (code, system, code_type, description, severity) "
+            "VALUES ('EV-X-001', 'EV-X', 'manufacturer', '测试', 'medium')"
+        )
+        conn.commit()
+        conn.close()
+
+        rows = db.get_codes_by_system_prefix("EV-X")
+        self.assertTrue(rows)
+        self.assertIn("frequency", rows[0])
+        self.assertEqual(rows[0]["frequency"], 0)
+
+        DatabaseManager._instance = None
+        _cleanup_dir(temp_dir)
 
 
 if __name__ == "__main__":

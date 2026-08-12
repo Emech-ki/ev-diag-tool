@@ -46,7 +46,15 @@ class TestEVSystemCodesCSV(unittest.TestCase):
             self.assertEqual(reader.fieldnames, [
                 "code", "system", "code_type", "description", "detail", "severity",
                 "common_causes", "diagnostic_steps", "related_codes", "symptoms",
+                "frequency",
             ])
+
+    def test_frequency_present_and_valid(self):
+        """频次列为 10-100 的整数"""
+        rows = _load_rows()
+        for r in rows:
+            freq = int(r.get("frequency", 0) or 0)
+            self.assertTrue(10 <= freq <= 100, f"频次越界: {r['code']} = {freq}")
 
     def test_code_format_and_unique(self):
         import re

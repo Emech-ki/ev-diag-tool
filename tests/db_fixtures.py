@@ -32,18 +32,20 @@ def setup_test_db(db_path):
     cursor.execute(CREATE_INDEX_VEHICLE_MODEL)
 
     def _insert_code(code, system, code_type, description, detail, severity,
-                     common_causes, diagnostic_steps, related_codes, symptoms):
+                     common_causes, diagnostic_steps, related_codes, symptoms,
+                     frequency=0):
         cursor.execute("""
             INSERT INTO obd_codes (code, system, code_type, description, detail,
                                    severity, common_causes, diagnostic_steps,
-                                   related_codes, symptoms)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                   related_codes, symptoms, frequency)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             code, system, code_type, description, detail, severity,
             json.dumps(common_causes, ensure_ascii=False),
             json.dumps(diagnostic_steps, ensure_ascii=False),
             related_codes,
-            json.dumps(symptoms, ensure_ascii=False)
+            json.dumps(symptoms, ensure_ascii=False),
+            frequency
         ))
 
     # 传统 P 码（有详情 + 相关码）
@@ -107,7 +109,8 @@ def setup_test_db(db_path):
         ["绝缘膜破损", "高压线束进水"],
         ["测量绝缘电阻", "分段检查高压回路"],
         "",
-        ["仪表显示绝缘故障"]
+        ["仪表显示绝缘故障"],
+        frequency=90
     )
     _insert_code(
         "EV-MOTOR-001", "EV-MOTOR", "ev", "电机旋变传感器信号异常", "MCU检测到旋变传感器正弦/余弦信号幅度异常",
@@ -115,7 +118,8 @@ def setup_test_db(db_path):
         ["旋变传感器线束断裂", "旋变传感器损坏"],
         ["检查旋变线束", "测量旋变信号"],
         "",
-        ["动力受限"]
+        ["动力受限"],
+        frequency=70
     )
     _insert_code(
         "EV-THERMAL-001", "EV-THERMAL", "ev", "电池冷却回路流量过低", "BMS检测到电池冷却回路冷却液流量低于阈值",
@@ -123,7 +127,8 @@ def setup_test_db(db_path):
         ["水泵故障", "冷却液不足"],
         ["检查水泵转速", "补充冷却液"],
         "",
-        ["电池温度偏高"]
+        ["电池温度偏高"],
+        frequency=30
     )
     _insert_code(
         "EV-VCU-001", "EV-VCU", "ev", "整车上电时序错误", "VCU检测到整车上电时序与预设逻辑不符",
@@ -131,7 +136,8 @@ def setup_test_db(db_path):
         ["VCU供电异常", "高压许可信号丢失"],
         ["核对上下电流程", "检查VCU供电"],
         "",
-        ["车辆无法上电"]
+        ["车辆无法上电"],
+        frequency=55
     )
 
     # 车型数据

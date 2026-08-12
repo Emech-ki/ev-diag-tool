@@ -21,7 +21,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 OUT_PATH = PROJECT_ROOT / "data" / "seed" / "ev_system_codes.csv"
 
 HEADER = ["code", "system", "code_type", "description", "detail", "severity",
-          "common_causes", "diagnostic_steps", "related_codes", "symptoms"]
+          "common_causes", "diagnostic_steps", "related_codes", "symptoms", "frequency"]
 
 # (system, [(description, severity, related)])
 # related 用代码中的 NNN 表示同系统内引用
@@ -460,6 +460,31 @@ def _to_num(n: int) -> str:
     return f"{n:03d}"
 
 
+# 确定性频次 seed：severity 基分 + 系统/序号抖动（无需 AI，可复现）
+# 抖动用内部稳定哈希（Python 内置 hash() 每次进程随机化，不适用）
+_SEV_FREQ_BASE = {"low": 40, "medium": 60, "high": 80, "critical": 95}
+
+
+def _stable_hash(s: str) -> int:
+    h = 0
+    for ch in s:
+        h = (h * 31 + ord(ch)) & 0xFFFFFFFF
+    return h
+
+
+def _frequency_for(system: str, code: str, severity: str) -> int:
+    base = _SEV_FREQ_BASE.get(severity, 50)
+    return max(10, min(100, base + _system_freq_bias(system, code)))
+
+
+def _system_freq_bias(system: str, code: str) -> int:
+    bias = {
+        "EV-BMS": 5, "EV-HV": 3, "EV-OBC": 2, "EV-DCDC": 1,
+        "EV-THERMAL": -1, "EV-MOTOR": 4, "EV-REGEN": -2, "EV-VCU": 3,
+    }.get(system, 0)
+    return bias - (_stable_hash(code) % 5)
+
+
 def build_rows():
     rows = []
     for system in ORDER:
@@ -477,6 +502,7 @@ def build_rows():
                 "diagnostic_steps": "[]",
                 "related_codes": ",".join(related),
                 "symptoms": "[]",
+                "frequency": _frequency_for(system, code, sev),
             })
     return rows
 
@@ -487,6 +513,15 @@ def _load_existing_rows() -> dict:
         return {}
     with open(str(OUT_PATH), encoding="utf-8") as f:
         return {r["code"]: r for r in csv.DictReader(f)}
+
+
+def _ensure_frequency(rows):
+    """为缺少 frequency 的行回填确定性频次（兼容升级前的旧 CSV/DB 行）"""
+    for r in rows:
+        if r.get("frequency") in (None, ""):
+            code = r["code"]
+            r["frequency"] = _frequency_for(r.get("system", ""), code, r.get("severity", "medium"))
+    return rows
 
 
 def _print_summary(rows):
@@ -514,7 +549,7 @@ def do_merge():
     with open(str(OUT_PATH), "w", encoding="utf-8", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=HEADER)
         writer.writeheader()
-        writer.writerows(rows)
+        writer.writerows(_ensure_frequency(rows))
 
     print(f"[MERGE] 已有 {len(existing)} 条，新增 {len(rows) - len(existing)} 条，共 {len(rows)} 条")
     _print_summary(rows)
@@ -550,7 +585,7 @@ def do_sync_db():
     conn.row_factory = sqlite3.Row
     rows = conn.execute(
         "SELECT code, system, code_type, description, detail, severity, "
-        "common_causes, diagnostic_steps, related_codes, symptoms "
+        "common_causes, diagnostic_steps, related_codes, symptoms, frequency "
         "FROM obd_codes WHERE code LIKE 'EV-%'"
     ).fetchall()
     conn.close()
@@ -558,6 +593,7 @@ def do_sync_db():
     by_code = {r["code"]: r for r in rows}
     existing = _load_existing_rows()
     rows_out = _merge_sync_rows(build_rows(), by_code, existing)
+    _ensure_frequency(rows_out)
 
     OUT_PATH.parent.mkdir(parents=True, exist_ok=True)
     with open(str(OUT_PATH), "w", encoding="utf-8", newline="") as f:
@@ -597,8 +633,8 @@ def do_upsert_db():
         conn.execute(
             "INSERT INTO obd_codes "
             "(code, system, code_type, description, detail, severity, "
-            " common_causes, diagnostic_steps, related_codes, symptoms) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            " common_causes, diagnostic_steps, related_codes, symptoms, frequency) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 code,
                 row.get("system", ""),
@@ -610,6 +646,7 @@ def do_upsert_db():
                 row.get("diagnostic_steps", "[]"),
                 row.get("related_codes", ""),
                 row.get("symptoms", "[]"),
+                int(row.get("frequency", 0) or 0),
             ),
         )
     conn.commit()

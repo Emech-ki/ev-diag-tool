@@ -121,8 +121,9 @@ def import_csv_to_db(csv_path, conn):
             cursor.execute("""
                 INSERT OR REPLACE INTO obd_codes
                     (code, system, code_type, description, detail,
-                     severity, common_causes, diagnostic_steps, related_codes, symptoms)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     severity, common_causes, diagnostic_steps, related_codes, symptoms,
+                     frequency)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 code,
                 row.get('system', 'Unknown'),
@@ -133,7 +134,8 @@ def import_csv_to_db(csv_path, conn):
                 common_causes,
                 diagnostic_steps,
                 row.get('related_codes', ''),
-                symptoms
+                symptoms,
+                int(row.get('frequency', 0) or 0)
             ))
             count += 1
 

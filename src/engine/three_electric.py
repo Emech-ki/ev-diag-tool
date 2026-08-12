@@ -193,13 +193,16 @@ def build_overview(kb: KnowledgeBase, subsystem: str) -> Dict[str, Any]:
 
     common = []
     try:
-        # 逐个系统前缀查询，过滤 + 按严重度排序取前 10
+        # 逐个系统前缀查询，过滤 + 按严重度优先、频次加权排序取前 10
         sev_order = {"critical": 0, "high": 1, "medium": 2, "low": 3}
         filtered = []
         for sys_name in info["systems"]:
             rows = kb.get_codes_by_system_prefix(sys_name, limit=50)
             filtered.extend(rows)
-        filtered.sort(key=lambda r: sev_order.get(r.get("severity", "low"), 9))
+        filtered.sort(key=lambda r: (
+            sev_order.get(r.get("severity", "low"), 9),
+            -int(r.get("frequency", 0) or 0),
+        ))
         common = filtered[:10]
     except (KeyError, TypeError, AttributeError) as e:
         logger.debug(f"build_overview common_codes 查询失败: {e}")

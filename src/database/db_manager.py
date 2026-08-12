@@ -63,6 +63,10 @@ class DatabaseManager:
             conn.execute(CREATE_INDEX_CODE)
             conn.execute(CREATE_INDEX_SYSTEM)
 
+            # 列迁移：老库补 frequency 列（v3.6.0 引入，幂等）
+            self._migrate_add_column(cursor, "obd_codes", "frequency",
+                                     "INTEGER DEFAULT 0")
+
             # diagnostic_history 表
             cursor.execute(
                 "SELECT name FROM sqlite_master WHERE type='table' AND name='diagnostic_history'"
@@ -84,6 +88,12 @@ class DatabaseManager:
             conn.commit()
         finally:
             conn.close()
+
+    def _migrate_add_column(self, cursor, table: str, column: str, definition: str):
+        """幂等补列：老库缺列时 ALTER TABLE 追加，已存在则跳过"""
+        cols = {row[1] for row in cursor.execute(f"PRAGMA table_info({table})").fetchall()}
+        if column not in cols:
+            cursor.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
 
     @staticmethod
     def _resolve_db_path() -> str:
@@ -231,7 +241,7 @@ class DatabaseManager:
         try:
             cursor = conn.cursor()
             cursor.execute("""
-                SELECT code, description, severity, detail
+                SELECT code, description, severity, detail, frequency
                 FROM obd_codes
                 WHERE code LIKE ? ESCAPE '\\'
                 ORDER BY code
