@@ -295,7 +295,7 @@ class TestPromptTemplates(unittest.TestCase):
         self.assertIn("故障码关联性判断", prompt)
 
     def test_multi_prompt_priority_codes(self):
-        """高疑似候选码 → prompt 含「高疑似候选码」提示段，无症状时也可用"""
+        """高疑似候选码 → prompt 含「高疑似候选码」提示段，无症状时也可用；带 weight 时渲染置信度"""
         from src.ai.prompt_templates import PromptTemplates
 
         templates = PromptTemplates()
@@ -304,10 +304,29 @@ class TestPromptTemplates(unittest.TestCase):
             results=[{"description": "x", "severity": "medium", "system": "BMS"}],
             correlation_summary="",
             priority_codes=["EV-BMS-006", "EV-BMS-015"],
+            priority_weights={"EV-BMS-006": 95, "EV-BMS-015": 85},
         )
         self.assertIn("高疑似候选码", prompt)
         self.assertIn("EV-BMS-006", prompt)
-        self.assertIn("疑似度从高到低", prompt)
+        self.assertIn("显式置信度从高到低", prompt)
+        self.assertIn("置信度 95%", prompt)
+        self.assertIn("置信度 85%", prompt)
+
+    def test_multi_prompt_priority_without_weights(self):
+        """高疑似候选码未带 weight 时仅列码，不渲染置信度"""
+        from src.ai.prompt_templates import PromptTemplates
+
+        templates = PromptTemplates()
+        prompt = templates.build_multi_diagnostic_prompt(
+            codes=["EV-BMS-006", "EV-BMS-015"],
+            results=[{"description": "x", "severity": "medium", "system": "BMS"}],
+            correlation_summary="",
+            priority_codes=["EV-BMS-006", "EV-BMS-015"],
+        )
+        self.assertIn("高疑似候选码", prompt)
+        self.assertIn("EV-BMS-006", prompt)
+        self.assertNotIn("置信度 95%", prompt)
+        self.assertNotIn("置信度 85%", prompt)
 
     def test_multi_prompt_without_priority(self):
         """未指定高疑似候选码时不出现提示段"""

@@ -728,16 +728,19 @@ class ResultPanel(QWidget):
             </div>
             """
 
-        # 显示顺序：向导标注的高疑似候选码（按标注顺序）排前，其余保持原顺序
+        # 显示顺序：向导标注的高疑似候选码（按 weight/标注顺序）排前，其余保持原顺序
         priority = [c for c in getattr(result, "priority_codes", []) if c in result.codes]
+        priority_weights = getattr(result, "priority_weights", None) or {}
         display_order = priority + [c for c in result.codes if c not in priority]
 
         for i, r in enumerate(display_order, 1):
             idx = result.codes.index(r) if r in result.codes else -1
             kb = result.results[idx].knowledge if idx >= 0 and idx < len(result.results) else None
             is_priority = r in priority
-            priority_badge = ('<span style="font-size: 11px; color: #B71C1C; background-color: #FFCDD2; '
-                              'padding: 2px 8px; border-radius: 4px; margin-left: 8px;">🎯 高疑似</span>'
+            w = priority_weights.get(r)
+            weight_text = f" {int(w)}%" if w is not None else ""
+            priority_badge = (f'<span style="font-size: 11px; color: #B71C1C; background-color: #FFCDD2; '
+                              f'padding: 2px 8px; border-radius: 4px; margin-left: 8px;">🎯 高疑似{weight_text}</span>'
                               if is_priority else "")
             if kb:
                 severity = kb.get('severity', 'medium')

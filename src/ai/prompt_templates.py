@@ -308,6 +308,7 @@ class PromptTemplates:
         vehicle_info: str = "",
         additional_info: str = "",
         priority_codes: Optional[List[str]] = None,
+        priority_weights: Optional[Dict[str, int]] = None,
     ) -> str:
         """
         构建多故障码综合诊断提示词
@@ -360,12 +361,17 @@ class PromptTemplates:
         if additional_info:
             prompt += f"## 已报告的症状（对症下药的关键）\n{additional_info}\n\n"
 
-        # 向导标注的高疑似候选码：把 guide 顺序作为「高疑似」提示传给 AI
+        # 向导标注的高疑似候选码：把 guide 的显式置信度 weight 作为「高疑似」提示传给 AI
+        weights = priority_weights or {}
         if priority:
-            prompt += "## 高疑似候选码（来自三电诊断向导，按疑似度从高到低）\n"
+            prompt += "## 高疑似候选码（来自三电诊断向导，按显式置信度从高到低）\n"
             for i, code in enumerate(priority, 1):
-                prompt += f"{i}. {code}\n"
-            prompt += "排序时可优先参考此顺序，但请结合症状与知识库信息做最终判断。\n\n"
+                w = weights.get(code)
+                if w is not None:
+                    prompt += f"{i}. {code}（置信度 {int(w)}%）\n"
+                else:
+                    prompt += f"{i}. {code}\n"
+            prompt += "排序时可优先参考此顺序与置信度，但请结合症状与知识库信息做最终判断。\n\n"
 
         # 安全提醒
         if is_critical:

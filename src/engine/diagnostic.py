@@ -39,6 +39,7 @@ class MultiCodeDiagnosticResult:
     ai_available: bool                            # AI 是否可用
     symptom_context: str = ""                     # 技师报告的症状上下文（现象/具体表现/排查提示）
     priority_codes: List[str] = field(default_factory=list)  # 向导标注的高疑似候选码（有序，越靠前越疑似）
+    priority_weights: Dict[str, int] = field(default_factory=dict)  # 高疑似候选码显式置信度 {code: weight}
     timestamp: str = field(default_factory=lambda: datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
 
     def has_knowledge(self) -> bool:
@@ -137,7 +138,8 @@ class DiagnosticEngine:
         )
 
     def diagnose_multiple(self, codes: List[str], vehicle_info: str = "", additional_info: str = "",
-                          priority_codes: Optional[List[str]] = None) -> MultiCodeDiagnosticResult:
+                          priority_codes: Optional[List[str]] = None,
+                          priority_weights: Optional[Dict[str, int]] = None) -> MultiCodeDiagnosticResult:
         """
         执行多故障码诊断
 
@@ -146,6 +148,7 @@ class DiagnosticEngine:
             vehicle_info: 车型信息（可选）
             additional_info: 附加描述信息（可选，含向导带入的症状上下文）
             priority_codes: 向导标注的高疑似候选码顺序（越靠前越疑似，可选）
+            priority_weights: 高疑似候选码显式置信度 {code: weight}（可选，0-100）
 
         Returns:
             MultiCodeDiagnosticResult 对象
@@ -187,6 +190,7 @@ class DiagnosticEngine:
                     vehicle_info=vehicle_info,
                     additional_info=additional_info,
                     priority_codes=priority_codes,
+                    priority_weights=priority_weights,
                 )
             except Exception as e:
                 ai_suggestion = f"⚠️ AI 综合分析服务暂时不可用: {str(e)}"
@@ -198,7 +202,8 @@ class DiagnosticEngine:
             ai_suggestion=ai_suggestion,
             ai_available=ai_available,
             symptom_context=additional_info,
-            priority_codes=list(priority_codes or [])
+            priority_codes=list(priority_codes or []),
+            priority_weights=dict(priority_weights or {}),
         )
 
     def search_codes(self, keyword: str) -> List[Dict[str, Any]]:

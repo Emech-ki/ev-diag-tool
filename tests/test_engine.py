@@ -417,15 +417,19 @@ class TestDiagnosticEngine(unittest.TestCase):
         self.assertFalse(result2.has_ai())
 
     def test_diagnose_multiple_priority_codes(self):
-        """多码诊断携带高疑似候选码 → 存入结果并透传给 AI"""
+        """多码诊断携带高疑似候选码+显式置信度 → 存入结果并透传给 AI"""
         self.mock_llm.is_available.return_value = True
         self.mock_llm.get_multi_code_analysis.return_value = "综合建议"
         priority = ["EV-BMS-006", "EV-BMS-015"]
+        weights = {"EV-BMS-006": 95, "EV-BMS-015": 85}
         result = self.engine.diagnose_multiple(["EV-BMS-006", "EV-BMS-015", "EV-BMS-041"],
-                                               additional_info="电量跳变", priority_codes=priority)
+                                               additional_info="电量跳变", priority_codes=priority,
+                                               priority_weights=weights)
         self.assertEqual(result.priority_codes, priority)
+        self.assertEqual(result.priority_weights, weights)
         called = self.mock_llm.get_multi_code_analysis.call_args
         self.assertEqual(called[1]["priority_codes"], priority)
+        self.assertEqual(called[1]["priority_weights"], weights)
 
     def test_diagnose_multiple_priority_codes_default_empty(self):
         """未指定高疑似候选码时默认为空列表"""

@@ -199,6 +199,7 @@ class LLMClient:
         vehicle_info: str = "",
         additional_info: str = "",
         priority_codes: Optional[List[str]] = None,
+        priority_weights: Optional[Dict[str, int]] = None,
     ) -> str:
         """获取多故障码综合分析"""
         with self._provider_lock:
@@ -213,6 +214,7 @@ class LLMClient:
             vehicle_info=vehicle_info,
             additional_info=additional_info,
             priority_codes=priority_codes,
+            priority_weights=priority_weights,
         )
 
         try:

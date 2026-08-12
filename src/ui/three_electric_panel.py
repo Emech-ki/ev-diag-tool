@@ -31,12 +31,14 @@ class ThreeElectricDiagnoseWorker(QThread):
     error = pyqtSignal(str)
 
     def __init__(self, engine: DiagnosticEngine, codes: list, symptom_context: str = "",
-                 priority_codes: Optional[list] = None):
+                 priority_codes: Optional[list] = None,
+                 priority_weights: Optional[dict] = None):
         super().__init__()
         self.engine = engine
         self.codes = codes
         self.symptom_context = symptom_context
         self.priority_codes = list(priority_codes or [])
+        self.priority_weights = dict(priority_weights or {})
 
     def run(self):
         try:
@@ -45,6 +47,7 @@ class ThreeElectricDiagnoseWorker(QThread):
                 codes=self.codes,
                 additional_info=self.symptom_context,
                 priority_codes=self.priority_codes,
+                priority_weights=self.priority_weights,
             )
             self.finished.emit(result)
         except Exception as e:
@@ -357,7 +360,7 @@ class ElectricSystemPage(QWidget):
 
         self._clear_wizard_body()
 
-        codes = option.get("candidate_codes", [])
+        codes = three_electric.get_option_codes(option)
         c = self._get_colors()
         chips = " ".join(
             f'<span style="font-family: Consolas; font-size: 12px; background-color: {c["PRIMARY_BG"]}; '
@@ -413,11 +416,14 @@ class ElectricSystemPage(QWidget):
         self._stop_worker()
         self._set_busy(True)
         self._inner_tabs.setCurrentIndex(self._RESULT_TAB_INDEX)
-        # 向导候选码顺序即「高疑似」标记：当前所选选项的候选码排前，其余自然靠后
-        priority = self._current_option.get("candidate_codes", []) if self._current_option else []
+        # 向导候选码显式置信度 weight：按 weight 降序即「高疑似」，
+        # weight 作为语音块随 priority_weights 贯穿 worker → diagnose_multiple → AI 提示
+        priority = three_electric.get_option_codes(self._current_option) if self._current_option else []
+        weights = three_electric.get_option_weights(self._current_option) if self._current_option else {}
         self.worker = ThreeElectricDiagnoseWorker(
             self.engine, codes, self._build_symptom_context(),
             priority_codes=priority,
+            priority_weights=weights,
         )
         self.worker.progress.connect(self._on_progress)
         self.worker.finished.connect(self._on_diagnose_finished)

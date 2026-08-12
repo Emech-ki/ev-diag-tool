@@ -20,6 +20,7 @@ from PyQt6.QtWidgets import QApplication
 from PyQt6.QtCore import Qt
 
 from src.engine.diagnostic import DiagnosticEngine
+from src.engine import three_electric
 from src.ui.three_electric_panel import ThreeElectricPanel, ElectricSystemPage
 
 
@@ -151,9 +152,9 @@ class TestElectricSystemPageWizard(unittest.TestCase):
         group = self.page._guide["symptom_groups"][0]
         option = group["options"][0]
         self.page._show_option(group, option)
-        self.page._start_diagnosis(option["candidate_codes"])
+        self.page._start_diagnosis(three_electric.get_option_codes(option))
         self.assertEqual(MockWorker.call_args[0][0], self.page.engine)
-        self.assertEqual(MockWorker.call_args[0][1], option["candidate_codes"])
+        self.assertEqual(MockWorker.call_args[0][1], three_electric.get_option_codes(option))
 
     @patch("src.ui.three_electric_panel.ThreeElectricDiagnoseWorker")
     def test_start_diagnosis_passes_symptom_context(self, MockWorker):
@@ -161,7 +162,7 @@ class TestElectricSystemPageWizard(unittest.TestCase):
         group = self.page._guide["symptom_groups"][0]
         option = group["options"][0]
         self.page._show_option(group, option)
-        self.page._start_diagnosis(option["candidate_codes"])
+        self.page._start_diagnosis(three_electric.get_option_codes(option))
         ctx = MockWorker.call_args[0][2]
         self.assertIn(self.page._overview["name"], ctx)
         self.assertIn(group["label"], ctx)
@@ -174,11 +175,11 @@ class TestElectricSystemPageWizard(unittest.TestCase):
         group = self.page._guide["symptom_groups"][0]
         option = group["options"][0]
         self.page._show_option(group, option)
-        self.page._start_diagnosis(option["candidate_codes"])
+        self.page._start_diagnosis(three_electric.get_option_codes(option))
         ctx = MockWorker.call_args[0][2]
 
         result = self.page.engine.diagnose_multiple(
-            codes=option["candidate_codes"], additional_info=ctx
+            codes=three_electric.get_option_codes(option), additional_info=ctx
         )
         self.page._on_diagnose_finished(result)
         html = self.page.result_panel.knowledge_browser.toHtml()
@@ -191,9 +192,9 @@ class TestElectricSystemPageWizard(unittest.TestCase):
         group = self.page._guide["symptom_groups"][0]
         option = group["options"][0]
         self.page._show_option(group, option)
-        self.page._start_diagnosis(option["candidate_codes"])
+        self.page._start_diagnosis(three_electric.get_option_codes(option))
         priority = MockWorker.call_args[1]["priority_codes"]
-        self.assertEqual(priority, option["candidate_codes"])
+        self.assertEqual(priority, three_electric.get_option_codes(option))
 
     @patch("src.ui.three_electric_panel.ThreeElectricDiagnoseWorker")
     def test_result_shows_priority_badge(self, MockWorker):
@@ -201,16 +202,16 @@ class TestElectricSystemPageWizard(unittest.TestCase):
         group = self.page._guide["symptom_groups"][0]
         option = group["options"][0]
         self.page._show_option(group, option)
-        self.page._start_diagnosis(option["candidate_codes"])
+        self.page._start_diagnosis(three_electric.get_option_codes(option))
 
         result = self.page.engine.diagnose_multiple(
-            codes=option["candidate_codes"], additional_info="ctx",
-            priority_codes=option["candidate_codes"],
+            codes=three_electric.get_option_codes(option), additional_info="ctx",
+            priority_codes=three_electric.get_option_codes(option),
         )
         self.page._on_diagnose_finished(result)
         html = self.page.result_panel.knowledge_browser.toHtml()
         self.assertIn("高疑似", html)
-        self.assertIn(option["candidate_codes"][0], html)
+        self.assertIn(three_electric.get_option_codes(option)[0], html)
 
     @patch("PyQt6.QtWidgets.QFileDialog")
     @patch("src.ui.export_utils.export_as_html")
@@ -234,8 +235,8 @@ class TestElectricSystemPageWizard(unittest.TestCase):
         self.page._show_option(group, option)
         ctx = self.page._build_symptom_context()
         result = self.page.engine.diagnose_multiple(
-            codes=option["candidate_codes"], additional_info=ctx,
-            priority_codes=option["candidate_codes"],
+            codes=three_electric.get_option_codes(option), additional_info=ctx,
+            priority_codes=three_electric.get_option_codes(option),
         )
         self.page.result_panel.show_multi_code_result(result)
 
@@ -254,7 +255,7 @@ class TestElectricSystemPageWizard(unittest.TestCase):
         option = group["options"][0]
         self.page._show_option(group, option)
         self.assertEqual(self.page._inner_tabs.currentIndex(), 0)
-        self.page._start_diagnosis(option["candidate_codes"])
+        self.page._start_diagnosis(three_electric.get_option_codes(option))
         self.assertEqual(self.page._inner_tabs.currentIndex(), 2)
 
     def test_stop_worker_no_worker_safe(self):

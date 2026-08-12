@@ -140,6 +140,19 @@ class TestThreeElectricGuide(unittest.TestCase):
                 for o in g["options"]:
                     self.assertIn("label", o, f"{sub}/{g['id']}")
                     self.assertTrue(o["candidate_codes"], f"{sub}/{g['id']} 候选码为空")
+                    codes = three_electric.get_option_codes(o)
+                    self.assertTrue(codes, f"{sub}/{g['id']} 候选码解析为空")
+                    for code in codes:
+                        self.assertIsInstance(code, str)
+                        self.assertRegex(code, r"^EV-[A-Z-]+-\d{3}$")
+                    weights = three_electric.get_option_weights(o)
+                    self.assertEqual(set(weights.keys()), set(codes), f"{sub}/{g['id']} weight 与码不一致")
+                    # 显式置信度在 (0, 100] 区间，且按 weight 降序
+                    for w in weights.values():
+                        self.assertTrue(0 < w <= 100, f"{sub}/{g['id']} weight 越界: {w}")
+                    parsed_weights = [weights[c] for c in codes]
+                    self.assertEqual(parsed_weights, sorted(parsed_weights, reverse=True),
+                                     f"{sub}/{g['id']} 未按 weight 降序")
 
     def test_guide_loads_through_module(self):
         guide = three_electric.load_three_electric_guide()
@@ -147,6 +160,32 @@ class TestThreeElectricGuide(unittest.TestCase):
 
     def test_get_guide_for_unknown_returns_empty(self):
         self.assertEqual(three_electric.get_guide_for("nope"), {})
+
+    def test_get_option_codes_sorts_by_weight_desc(self):
+        """对象式候选码按 weight 降序，旧式字符串按位置回退"""
+        obj = {"candidate_codes": [
+            {"code": "EV-BMS-006", "weight": 70},
+            {"code": "EV-BMS-015", "weight": 95},
+            {"code": "EV-BMS-041", "weight": 60},
+        ]}
+        self.assertEqual(three_electric.get_option_codes(obj),
+                         ["EV-BMS-015", "EV-BMS-006", "EV-BMS-041"])
+        self.assertEqual(three_electric.get_option_weights(obj),
+                         {"EV-BMS-015": 95, "EV-BMS-006": 70, "EV-BMS-041": 60})
+
+    def test_get_option_codes_legacy_strings(self):
+        """旧式字符串数组也能解析（兼容降级）"""
+        legacy = {"candidate_codes": ["EV-OBC-001", "EV-OBC-021", "EV-OBC-023"]}
+        self.assertEqual(three_electric.get_option_codes(legacy),
+                         ["EV-OBC-001", "EV-OBC-021", "EV-OBC-023"])
+        weights = three_electric.get_option_weights(legacy)
+        self.assertEqual(weights["EV-OBC-001"], 90)
+        self.assertEqual(weights["EV-OBC-021"], 80)
+        self.assertEqual(weights["EV-OBC-023"], 70)
+
+    def test_get_option_codes_missing_field(self):
+        self.assertEqual(three_electric.get_option_codes({}), [])
+        self.assertEqual(three_electric.get_option_weights({}), {})
 
 
 class TestThreeElectricGuideCodesReachKB(unittest.TestCase):
@@ -160,7 +199,7 @@ class TestThreeElectricGuideCodesReachKB(unittest.TestCase):
         for sub, data in guide.items():
             for g in data["symptom_groups"]:
                 for o in g["options"]:
-                    for code in o["candidate_codes"]:
+                    for code in three_electric.get_option_codes(o):
                         if code not in real:
                             missing.append((sub, g["id"], code))
         self.assertEqual(missing, [], f"向导候选码不在知识库: {missing}")
@@ -282,7 +321,8 @@ class TestThreeElectricWorker(unittest.TestCase):
 
         self.assertNotIn("error", result)
         engine.diagnose_multiple.assert_called_once_with(
-            codes=["EV-BMS-001"], additional_info=ctx, priority_codes=[]
+            codes=["EV-BMS-001"], additional_info=ctx, priority_codes=[],
+            priority_weights={}
         )
 
     def test_worker_forwards_priority_codes(self):
@@ -303,6 +343,7 @@ class TestThreeElectricWorker(unittest.TestCase):
             engine, ["EV-BMS-001", "EV-BMS-015"],
             symptom_context="ctx",
             priority_codes=["EV-BMS-001", "EV-BMS-015"],
+            priority_weights={"EV-BMS-001": 95, "EV-BMS-015": 85},
         )
         loop = QEventLoop()
         result = {}
@@ -316,6 +357,7 @@ class TestThreeElectricWorker(unittest.TestCase):
             codes=["EV-BMS-001", "EV-BMS-015"],
             additional_info="ctx",
             priority_codes=["EV-BMS-001", "EV-BMS-015"],
+            priority_weights={"EV-BMS-001": 95, "EV-BMS-015": 85},
         )
 
 

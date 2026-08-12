@@ -10,15 +10,66 @@
         "options": [
           {
             "label": "完全无法启动充电",
-            "candidate_codes": ["EV-OBC-001", "EV-OBC-021", "EV-OBC-023", "EV-OBC-019"]
+            "candidate_codes": [
+              {
+                "code": "EV-OBC-001",
+                "weight": 95
+              },
+              {
+                "code": "EV-OBC-021",
+                "weight": 85
+              },
+              {
+                "code": "EV-OBC-023",
+                "weight": 70
+              },
+              {
+                "code": "EV-OBC-019",
+                "weight": 55
+              }
+            ]
           },
           {
             "label": "充电中途中断",
-            "candidate_codes": ["EV-OBC-006", "EV-OBC-027", "EV-OBC-035", "EV-OBC-010"]
+            "candidate_codes": [
+              {
+                "code": "EV-OBC-006",
+                "weight": 95
+              },
+              {
+                "code": "EV-OBC-027",
+                "weight": 85
+              },
+              {
+                "code": "EV-OBC-035",
+                "weight": 70
+              },
+              {
+                "code": "EV-OBC-010",
+                "weight": 55
+              }
+            ]
           },
           {
             "label": "充电功率低 / 充电很慢",
-            "candidate_codes": ["EV-OBC-002", "EV-OBC-003", "EV-OBC-018", "EV-OBC-024"]
+            "candidate_codes": [
+              {
+                "code": "EV-OBC-002",
+                "weight": 95
+              },
+              {
+                "code": "EV-OBC-003",
+                "weight": 85
+              },
+              {
+                "code": "EV-OBC-018",
+                "weight": 70
+              },
+              {
+                "code": "EV-OBC-024",
+                "weight": 55
+              }
+            ]
           }
         ],
         "final_hint": "优先检查 OBC 与充电桩的握手状态、充电口温度和绝缘状态。"
@@ -30,15 +81,62 @@
         "options": [
           {
             "label": "电量跳变 / 显示不准",
-            "candidate_codes": ["EV-BMS-006", "EV-BMS-015", "EV-BMS-041", "EV-BMS-044"]
+            "candidate_codes": [
+              {
+                "code": "EV-BMS-006",
+                "weight": 95
+              },
+              {
+                "code": "EV-BMS-015",
+                "weight": 85
+              },
+              {
+                "code": "EV-BMS-041",
+                "weight": 70
+              },
+              {
+                "code": "EV-BMS-044",
+                "weight": 55
+              }
+            ]
           },
           {
             "label": "放电很快 / 动力衰减",
-            "candidate_codes": ["EV-BMS-043", "EV-BMS-024", "EV-BMS-007", "EV-BMS-002"]
+            "candidate_codes": [
+              {
+                "code": "EV-BMS-043",
+                "weight": 95
+              },
+              {
+                "code": "EV-BMS-024",
+                "weight": 85
+              },
+              {
+                "code": "EV-BMS-007",
+                "weight": 70
+              },
+              {
+                "code": "EV-BMS-002",
+                "weight": 55
+              }
+            ]
           },
           {
             "label": "充电也充不满",
-            "candidate_codes": ["EV-BMS-040", "EV-BMS-002", "EV-BMS-006"]
+            "candidate_codes": [
+              {
+                "code": "EV-BMS-040",
+                "weight": 95
+              },
+              {
+                "code": "EV-BMS-002",
+                "weight": 85
+              },
+              {
+                "code": "EV-BMS-006",
+                "weight": 60
+              }
+            ]
           }
         ],
         "final_hint": "结合 SOC/SOH 数据流核对采样精度，检查单体电压极差与内阻。"
@@ -50,15 +148,66 @@
         "options": [
           {
             "label": "绝缘电阻过低告警",
-            "candidate_codes": ["EV-BMS-004", "EV-HV-001", "EV-BMS-038", "EV-BMS-030"]
+            "candidate_codes": [
+              {
+                "code": "EV-BMS-004",
+                "weight": 95
+              },
+              {
+                "code": "EV-HV-001",
+                "weight": 85
+              },
+              {
+                "code": "EV-BMS-038",
+                "weight": 70
+              },
+              {
+                "code": "EV-BMS-030",
+                "weight": 55
+              }
+            ]
           },
           {
             "label": "高压互锁断开告警",
-            "candidate_codes": ["EV-BMS-010", "EV-HV-002", "EV-BMS-048", "EV-HV-009"]
+            "candidate_codes": [
+              {
+                "code": "EV-BMS-010",
+                "weight": 95
+              },
+              {
+                "code": "EV-HV-002",
+                "weight": 85
+              },
+              {
+                "code": "EV-BMS-048",
+                "weight": 70
+              },
+              {
+                "code": "EV-HV-009",
+                "weight": 55
+              }
+            ]
           },
           {
             "label": "冒烟 / 异味 / 气压异常",
-            "candidate_codes": ["EV-BMS-011", "EV-BMS-012", "EV-BMS-018", "EV-BMS-023"]
+            "candidate_codes": [
+              {
+                "code": "EV-BMS-011",
+                "weight": 95
+              },
+              {
+                "code": "EV-BMS-012",
+                "weight": 85
+              },
+              {
+                "code": "EV-BMS-018",
+                "weight": 70
+              },
+              {
+                "code": "EV-BMS-023",
+                "weight": 55
+              }
+            ]
           }
         ],
         "final_hint": "⚠ 涉及高压安全，立即停驶。先断维修开关并等待放电，再分段测绝缘。"
@@ -70,15 +219,66 @@
         "options": [
           {
             "label": "电池温度明显偏高",
-            "candidate_codes": ["EV-THERMAL-001", "EV-THERMAL-032", "EV-THERMAL-013", "EV-BMS-022"]
+            "candidate_codes": [
+              {
+                "code": "EV-THERMAL-001",
+                "weight": 95
+              },
+              {
+                "code": "EV-THERMAL-032",
+                "weight": 85
+              },
+              {
+                "code": "EV-THERMAL-013",
+                "weight": 70
+              },
+              {
+                "code": "EV-BMS-022",
+                "weight": 55
+              }
+            ]
           },
           {
             "label": "散热/水泵异常",
-            "candidate_codes": ["EV-THERMAL-003", "EV-THERMAL-015", "EV-THERMAL-019", "EV-THERMAL-040"]
+            "candidate_codes": [
+              {
+                "code": "EV-THERMAL-003",
+                "weight": 95
+              },
+              {
+                "code": "EV-THERMAL-015",
+                "weight": 85
+              },
+              {
+                "code": "EV-THERMAL-019",
+                "weight": 70
+              },
+              {
+                "code": "EV-THERMAL-040",
+                "weight": 55
+              }
+            ]
           },
           {
             "label": "低温环境加热失效",
-            "candidate_codes": ["EV-THERMAL-002", "EV-THERMAL-006", "EV-THERMAL-021", "EV-THERMAL-029"]
+            "candidate_codes": [
+              {
+                "code": "EV-THERMAL-002",
+                "weight": 95
+              },
+              {
+                "code": "EV-THERMAL-006",
+                "weight": 85
+              },
+              {
+                "code": "EV-THERMAL-021",
+                "weight": 70
+              },
+              {
+                "code": "EV-THERMAL-029",
+                "weight": 55
+              }
+            ]
           }
         ],
         "final_hint": "检查冷却液液位、水泵转速与热管理数据流，排除过温扩散风险。"
@@ -96,15 +296,62 @@
         "options": [
           {
             "label": "加速明显无力",
-            "candidate_codes": ["EV-MOTOR-020", "EV-MOTOR-034", "EV-MOTOR-001", "EV-MOTOR-031"]
+            "candidate_codes": [
+              {
+                "code": "EV-MOTOR-020",
+                "weight": 95
+              },
+              {
+                "code": "EV-MOTOR-034",
+                "weight": 85
+              },
+              {
+                "code": "EV-MOTOR-001",
+                "weight": 70
+              },
+              {
+                "code": "EV-MOTOR-031",
+                "weight": 55
+              }
+            ]
           },
           {
             "label": "起步 / 爬坡无力",
-            "candidate_codes": ["EV-MOTOR-010", "EV-MOTOR-050", "EV-MOTOR-043"]
+            "candidate_codes": [
+              {
+                "code": "EV-MOTOR-010",
+                "weight": 95
+              },
+              {
+                "code": "EV-MOTOR-050",
+                "weight": 85
+              },
+              {
+                "code": "EV-MOTOR-043",
+                "weight": 60
+              }
+            ]
           },
           {
             "label": "扭矩受限告警",
-            "candidate_codes": ["EV-MOTOR-020", "EV-MOTOR-031", "EV-MOTOR-001", "EV-MOTOR-037"]
+            "candidate_codes": [
+              {
+                "code": "EV-MOTOR-020",
+                "weight": 95
+              },
+              {
+                "code": "EV-MOTOR-031",
+                "weight": 85
+              },
+              {
+                "code": "EV-MOTOR-001",
+                "weight": 70
+              },
+              {
+                "code": "EV-MOTOR-037",
+                "weight": 55
+              }
+            ]
           }
         ],
         "final_hint": "核对 MCU 数据流（扭矩请求 vs 实际、母线电压、绕组温度），先查散热再查控制。"
@@ -116,15 +363,58 @@
         "options": [
           {
             "label": "行驶中顿挫 / 抖动",
-            "candidate_codes": ["EV-MOTOR-004", "EV-MOTOR-029", "EV-MOTOR-040", "EV-MOTOR-046"]
+            "candidate_codes": [
+              {
+                "code": "EV-MOTOR-004",
+                "weight": 95
+              },
+              {
+                "code": "EV-MOTOR-029",
+                "weight": 85
+              },
+              {
+                "code": "EV-MOTOR-040",
+                "weight": 70
+              },
+              {
+                "code": "EV-MOTOR-046",
+                "weight": 55
+              }
+            ]
           },
           {
             "label": "机械异响",
-            "candidate_codes": ["EV-MOTOR-023", "EV-MOTOR-032", "EV-MOTOR-021"]
+            "candidate_codes": [
+              {
+                "code": "EV-MOTOR-023",
+                "weight": 95
+              },
+              {
+                "code": "EV-MOTOR-032",
+                "weight": 85
+              },
+              {
+                "code": "EV-MOTOR-021",
+                "weight": 60
+              }
+            ]
           },
           {
             "label": "电流声 / 电磁噪声",
-            "candidate_codes": ["EV-MOTOR-035", "EV-MOTOR-012", "EV-MOTOR-036"]
+            "candidate_codes": [
+              {
+                "code": "EV-MOTOR-035",
+                "weight": 95
+              },
+              {
+                "code": "EV-MOTOR-012",
+                "weight": 85
+              },
+              {
+                "code": "EV-MOTOR-036",
+                "weight": 60
+              }
+            ]
           }
         ],
         "final_hint": "区分轴承磨损、齿轮间隙与电磁噪声；检查三相电流平衡与旋变信号。"
@@ -136,15 +426,66 @@
         "options": [
           {
             "label": "松油门不回收 / 回收失效",
-            "candidate_codes": ["EV-REGEN-001", "EV-REGEN-008", "EV-REGEN-021", "EV-REGEN-037"]
+            "candidate_codes": [
+              {
+                "code": "EV-REGEN-001",
+                "weight": 95
+              },
+              {
+                "code": "EV-REGEN-008",
+                "weight": 85
+              },
+              {
+                "code": "EV-REGEN-021",
+                "weight": 70
+              },
+              {
+                "code": "EV-REGEN-037",
+                "weight": 55
+              }
+            ]
           },
           {
             "label": "回收时顿挫 / 不平滑",
-            "candidate_codes": ["EV-REGEN-003", "EV-REGEN-038", "EV-REGEN-022", "EV-REGEN-041"]
+            "candidate_codes": [
+              {
+                "code": "EV-REGEN-003",
+                "weight": 95
+              },
+              {
+                "code": "EV-REGEN-038",
+                "weight": 85
+              },
+              {
+                "code": "EV-REGEN-022",
+                "weight": 70
+              },
+              {
+                "code": "EV-REGEN-041",
+                "weight": 55
+              }
+            ]
           },
           {
             "label": "回收功率明显变小",
-            "candidate_codes": ["EV-REGEN-002", "EV-REGEN-019", "EV-REGEN-013", "EV-REGEN-009"]
+            "candidate_codes": [
+              {
+                "code": "EV-REGEN-002",
+                "weight": 95
+              },
+              {
+                "code": "EV-REGEN-019",
+                "weight": 85
+              },
+              {
+                "code": "EV-REGEN-013",
+                "weight": 70
+              },
+              {
+                "code": "EV-REGEN-009",
+                "weight": 55
+              }
+            ]
           }
         ],
         "final_hint": "检查制动踏板信号、SOC 状态与 ESP 协调报文，确认回收扭矩请求链路。"
@@ -156,15 +497,54 @@
         "options": [
           {
             "label": "重载 / 高速时过热",
-            "candidate_codes": ["EV-MOTOR-001", "EV-MOTOR-043", "EV-MOTOR-024", "EV-MOTOR-031"]
+            "candidate_codes": [
+              {
+                "code": "EV-MOTOR-001",
+                "weight": 95
+              },
+              {
+                "code": "EV-MOTOR-043",
+                "weight": 85
+              },
+              {
+                "code": "EV-MOTOR-024",
+                "weight": 70
+              },
+              {
+                "code": "EV-MOTOR-031",
+                "weight": 55
+              }
+            ]
           },
           {
             "label": "伴随冷却液泄漏",
-            "candidate_codes": ["EV-MOTOR-015", "EV-MOTOR-037", "EV-MOTOR-024"]
+            "candidate_codes": [
+              {
+                "code": "EV-MOTOR-015",
+                "weight": 95
+              },
+              {
+                "code": "EV-MOTOR-037",
+                "weight": 85
+              },
+              {
+                "code": "EV-MOTOR-024",
+                "weight": 60
+              }
+            ]
           },
           {
             "label": "散热风扇异常",
-            "candidate_codes": ["EV-MOTOR-041", "EV-MOTOR-001"]
+            "candidate_codes": [
+              {
+                "code": "EV-MOTOR-041",
+                "weight": 95
+              },
+              {
+                "code": "EV-MOTOR-001",
+                "weight": 80
+              }
+            ]
           }
         ],
         "final_hint": "检查绕组温度、冷却回路流量与风扇状态，过温会触发降功率保护。"
@@ -182,15 +562,62 @@
         "options": [
           {
             "label": "整车完全无反应",
-            "candidate_codes": ["EV-VCU-001", "EV-VCU-027", "EV-VCU-047", "EV-VCU-017"]
+            "candidate_codes": [
+              {
+                "code": "EV-VCU-001",
+                "weight": 95
+              },
+              {
+                "code": "EV-VCU-027",
+                "weight": 85
+              },
+              {
+                "code": "EV-VCU-047",
+                "weight": 70
+              },
+              {
+                "code": "EV-VCU-017",
+                "weight": 55
+              }
+            ]
           },
           {
             "label": "偶发上电失败 / 需多次尝试",
-            "candidate_codes": ["EV-VCU-011", "EV-VCU-034", "EV-VCU-019", "EV-VCU-010"]
+            "candidate_codes": [
+              {
+                "code": "EV-VCU-011",
+                "weight": 95
+              },
+              {
+                "code": "EV-VCU-034",
+                "weight": 85
+              },
+              {
+                "code": "EV-VCU-019",
+                "weight": 70
+              },
+              {
+                "code": "EV-VCU-010",
+                "weight": 55
+              }
+            ]
           },
           {
             "label": "上电即报高压异常",
-            "candidate_codes": ["EV-VCU-027", "EV-VCU-035", "EV-VCU-001"]
+            "candidate_codes": [
+              {
+                "code": "EV-VCU-027",
+                "weight": 95
+              },
+              {
+                "code": "EV-VCU-035",
+                "weight": 85
+              },
+              {
+                "code": "EV-VCU-001",
+                "weight": 60
+              }
+            ]
           }
         ],
         "final_hint": "先核对上下电时序与高压许可信号，再查 VCU 供电和唤醒源。"
@@ -202,15 +629,54 @@
         "options": [
           {
             "label": "挂挡无反应",
-            "candidate_codes": ["EV-VCU-008", "EV-VCU-042", "EV-VCU-043"]
+            "candidate_codes": [
+              {
+                "code": "EV-VCU-008",
+                "weight": 95
+              },
+              {
+                "code": "EV-VCU-042",
+                "weight": 85
+              },
+              {
+                "code": "EV-VCU-043",
+                "weight": 60
+              }
+            ]
           },
           {
             "label": "挡位错误 / 提示冲突",
-            "candidate_codes": ["EV-VCU-009", "EV-VCU-008", "EV-VCU-028"]
+            "candidate_codes": [
+              {
+                "code": "EV-VCU-009",
+                "weight": 95
+              },
+              {
+                "code": "EV-VCU-008",
+                "weight": 85
+              },
+              {
+                "code": "EV-VCU-028",
+                "weight": 60
+              }
+            ]
           },
           {
             "label": "挡位信号偶发丢失",
-            "candidate_codes": ["EV-VCU-008", "EV-VCU-042", "EV-VCU-020"]
+            "candidate_codes": [
+              {
+                "code": "EV-VCU-008",
+                "weight": 95
+              },
+              {
+                "code": "EV-VCU-042",
+                "weight": 85
+              },
+              {
+                "code": "EV-VCU-020",
+                "weight": 60
+              }
+            ]
           }
         ],
         "final_hint": "检查挡位信号线束、VCU 输入与驻车请求逻辑。"
@@ -222,15 +688,62 @@
         "options": [
           {
             "label": "多个控制器通信中断",
-            "candidate_codes": ["EV-VCU-004", "EV-VCU-020", "EV-VCU-036", "EV-VCU-005"]
+            "candidate_codes": [
+              {
+                "code": "EV-VCU-004",
+                "weight": 95
+              },
+              {
+                "code": "EV-VCU-020",
+                "weight": 85
+              },
+              {
+                "code": "EV-VCU-036",
+                "weight": 70
+              },
+              {
+                "code": "EV-VCU-005",
+                "weight": 55
+              }
+            ]
           },
           {
             "label": "与特定控制器超时",
-            "candidate_codes": ["EV-VCU-021", "EV-VCU-022", "EV-VCU-023", "EV-VCU-046"]
+            "candidate_codes": [
+              {
+                "code": "EV-VCU-021",
+                "weight": 95
+              },
+              {
+                "code": "EV-VCU-022",
+                "weight": 85
+              },
+              {
+                "code": "EV-VCU-023",
+                "weight": 70
+              },
+              {
+                "code": "EV-VCU-046",
+                "weight": 55
+              }
+            ]
           },
           {
             "label": "仪表报网络故障",
-            "candidate_codes": ["EV-VCU-045", "EV-VCU-004", "EV-VCU-036"]
+            "candidate_codes": [
+              {
+                "code": "EV-VCU-045",
+                "weight": 95
+              },
+              {
+                "code": "EV-VCU-004",
+                "weight": 85
+              },
+              {
+                "code": "EV-VCU-036",
+                "weight": 60
+              }
+            ]
           }
         ],
         "final_hint": "检查 CAN 总线终端电阻、VCU 供电与相关控制器报文周期。"
@@ -242,15 +755,58 @@
         "options": [
           {
             "label": "仪表提示降功率 / 限速",
-            "candidate_codes": ["EV-VCU-016", "EV-VCU-041", "EV-VCU-035", "EV-VCU-012"]
+            "candidate_codes": [
+              {
+                "code": "EV-VCU-016",
+                "weight": 95
+              },
+              {
+                "code": "EV-VCU-041",
+                "weight": 85
+              },
+              {
+                "code": "EV-VCU-035",
+                "weight": 70
+              },
+              {
+                "code": "EV-VCU-012",
+                "weight": 55
+              }
+            ]
           },
           {
             "label": "伴随踏板信号异常",
-            "candidate_codes": ["EV-VCU-014", "EV-VCU-015", "EV-VCU-013"]
+            "candidate_codes": [
+              {
+                "code": "EV-VCU-014",
+                "weight": 95
+              },
+              {
+                "code": "EV-VCU-015",
+                "weight": 85
+              },
+              {
+                "code": "EV-VCU-013",
+                "weight": 60
+              }
+            ]
           },
           {
             "label": "伴随扭矩仲裁告警",
-            "candidate_codes": ["EV-VCU-012", "EV-VCU-013", "EV-VCU-029"]
+            "candidate_codes": [
+              {
+                "code": "EV-VCU-012",
+                "weight": 95
+              },
+              {
+                "code": "EV-VCU-013",
+                "weight": 85
+              },
+              {
+                "code": "EV-VCU-029",
+                "weight": 60
+              }
+            ]
           }
         ],
         "final_hint": "先确认触发降级的源信号（踏板 / 扭矩 / 安全状态），再检查 VCU 逻辑。"

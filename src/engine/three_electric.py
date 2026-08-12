@@ -132,6 +132,41 @@ def get_guide_for(subsystem: str) -> dict:
     return guide.get(subsystem, {})
 
 
+def get_option_codes(option: dict) -> List[str]:
+    """
+    提取向导选项的候选故障码（按 weight 降序，保持原顺序稳定）
+
+    candidate_codes 支持两种形态（v3.6.0 起统一为对象式）：
+        - [{"code": "EV-BMS-001", "weight": 95}, ...]
+        - ["EV-BMS-001", ...]  （旧式，weight 按数组序号回退）
+    """
+    raw = option.get("candidate_codes", []) or []
+    parsed = []
+    for i, item in enumerate(raw):
+        if isinstance(item, dict):
+            code = str(item.get("code", "")).strip()
+            parsed.append((code, int(item.get("weight", 0) or 0), i))
+        else:
+            code = str(item).strip()
+            parsed.append((code, max(0, 90 - i * 10), i))
+    parsed.sort(key=lambda t: (-t[1], t[2]))
+    return [t[0] for t in parsed if t[0]]
+
+
+def get_option_weights(option: dict) -> Dict[str, int]:
+    """提取向导选项的候选码显式置信度映射 {code: weight}（0-100）"""
+    weights: Dict[str, int] = {}
+    raw = option.get("candidate_codes", []) or []
+    for i, item in enumerate(raw):
+        if isinstance(item, dict):
+            code = str(item.get("code", "")).strip()
+            weights[code] = int(item.get("weight", 0) or 0)
+        else:
+            code = str(item).strip()
+            weights[code] = max(0, 90 - i * 10)
+    return weights
+
+
 def build_overview(kb: KnowledgeBase, subsystem: str) -> Dict[str, Any]:
     """
     构建指定三电子系统的覆盖概览
