@@ -59,6 +59,7 @@ def get_symptom_colors() -> dict:
             "symptom_title_color": "#66BB6A",
             "symptom_text_color": "#A5D6A7",
             "symptom_display_bg": "#253525",
+            "symptom_disabled": "#2E4A2E",
         }
     else:
         return {
@@ -67,4 +68,5 @@ def get_symptom_colors() -> dict:
             "symptom_title_color": "#558B2F",
             "symptom_text_color": "#33691E",
             "symptom_display_bg": "rgba(255,255,255,0.6)",
+            "symptom_disabled": "#C5E1A5",
         }

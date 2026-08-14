@@ -244,14 +244,48 @@ class TestThreeElectricOverview(unittest.TestCase):
             self.assertIn(r["code"], real)
 
     def test_common_codes_severe_first_then_frequency(self):
-        """高频码排序：主键严重度，次键频次降序"""
+        """高频码排序：主键严重度，次键融合频次降序"""
         ov = three_electric.build_overview(self.kb, "battery")
         sev_order = {"critical": 0, "high": 1, "medium": 2, "low": 3}
         sorted_codes = ov["common_codes"]
         for prev, cur in zip(sorted_codes, sorted_codes[1:]):
             sp, sc = sev_order.get(prev["severity"], 9), sev_order.get(cur["severity"], 9)
-            fp, fc = int(prev.get("frequency", 0) or 0), int(cur.get("frequency", 0) or 0)
+
+            def _fused(row):
+                return (three_electric.FREQ_REAL_WEIGHT * int(row.get("real_frequency", 0) or 0)
+                        + three_electric.FREQ_SEED_WEIGHT * int(row.get("frequency", 0) or 0))
+
+            fp, fc = _fused(prev), _fused(cur)
             self.assertTrue((sp, -fp) <= (sc, -fc), f"{prev['code']} 应排在 {cur['code']} 前")
+
+    def test_common_codes_respects_subsystem_quota(self):
+        """常见故障受子系统配额约束（battery 至多 5 席）"""
+        ov = three_electric.build_overview(self.kb, "battery")
+        self.assertLessEqual(len(ov["common_codes"]), three_electric.OVERVIEW_QUOTA["battery"])
+        self.assertLessEqual(len(ov["common_codes"]), three_electric.OVERVIEW_TOP_N)
+
+    def test_common_codes_cover_each_battery_system(self):
+        """battery 概览的常见故障应覆盖每个系统（EV-BMS/HV/OBC/DCDC/THERMAL）"""
+        ov = three_electric.build_overview(self.kb, "battery")
+        systems = {r["code"].rsplit("-", 1)[0] for r in ov["common_codes"]}
+        for expected in ("EV-BMS", "EV-HV", "EV-OBC", "EV-DCDC", "EV-THERMAL"):
+            self.assertIn(expected, systems, f"battery 概览缺少 {expected} 的常见故障")
+
+    def test_common_codes_motor_vcu_quota(self):
+        """motor/vcu 配额分别至多 3/2 席"""
+        for sub, cap in (("motor", 3), ("vcu", 2)):
+            ov = three_electric.build_overview(self.kb, sub)
+            self.assertLessEqual(len(ov["common_codes"]), cap,
+                                 f"{sub} 常见故障超过配额 {cap}")
+
+    def test_build_overview_falls_back_on_kb_error(self):
+        """KB 查询异常时 common_codes 兜底为空列表"""
+        kb = MagicMock()
+        kb.get_system_detail_coverage.return_value = []
+        kb.get_codes_by_system_prefix.side_effect = AttributeError("boom")
+        ov = three_electric.build_overview(kb, "battery")
+        self.assertEqual(ov["common_codes"], [])
+        self.assertEqual(ov["total_codes"], 0)
 
 
 class TestThreeElectricWorker(unittest.TestCase):

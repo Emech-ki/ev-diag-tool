@@ -551,5 +551,21 @@ class TestHistoryPanelRefreshTheme(unittest.TestCase):
         panel.refresh_theme()  # 不应抛异常
 
 
+class TestMainWindowStartupTheme(unittest.TestCase):
+    """启动即应用主题：修复深色启动时 tab 文字黑字 / 各面板残留浅色"""
+
+    def test_init_applies_theme_and_sets_tab_base_color(self):
+        from src.ui.main_window import MainWindow
+
+        with patch.object(MainWindow, "_check_database"), \
+             patch.object(MainWindow, "_check_ai"), \
+             patch.object(MainWindow, "_load_vehicle_data"):
+            w = MainWindow()
+        # 外层 tab 基础样式必须带 color（非仅 :selected），深色启动时文字不会变黑
+        ss = w.tab_widget.styleSheet()
+        self.assertIn("border-bottom: none; color:", ss)
+        w.close()
+
+
 if __name__ == "__main__":
     unittest.main()

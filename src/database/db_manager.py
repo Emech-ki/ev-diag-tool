@@ -9,7 +9,7 @@ import os
 import sys
 import shutil
 import threading
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional, List, Dict, Any, Tuple
 from src.config import DB_PATH as CONFIG_DB_PATH
@@ -63,8 +63,10 @@ class DatabaseManager:
             conn.execute(CREATE_INDEX_CODE)
             conn.execute(CREATE_INDEX_SYSTEM)
 
-            # 列迁移：老库补 frequency 列（v3.6.0 引入，幂等）
+            # 列迁移：老库补 frequency / real_frequency 列（v3.6.0/3.6.1 引入，幂等）
             self._migrate_add_column(cursor, "obd_codes", "frequency",
+                                     "INTEGER DEFAULT 0")
+            self._migrate_add_column(cursor, "obd_codes", "real_frequency",
                                      "INTEGER DEFAULT 0")
 
             # diagnostic_history 表
@@ -241,7 +243,7 @@ class DatabaseManager:
         try:
             cursor = conn.cursor()
             cursor.execute("""
-                SELECT code, description, severity, detail, frequency
+                SELECT code, description, severity, detail, frequency, real_frequency
                 FROM obd_codes
                 WHERE code LIKE ? ESCAPE '\\'
                 ORDER BY code
@@ -390,7 +392,7 @@ class DatabaseManager:
                         (code, vehicle_info, symptoms, knowledge_found, ai_suggestion, created_at)
                     VALUES (?, ?, ?, ?, ?, ?)
                 """, (code, vehicle_info, symptoms, 1 if knowledge_found else 0, ai_suggestion, now))
-                return True
+                saved = True
             except sqlite3.OperationalError as e:
                 if "locked" in str(e) and attempt < 4:
                     time.sleep(1 + attempt)
@@ -400,7 +402,74 @@ class DatabaseManager:
                 raise
             finally:
                 conn.close()
+            if saved:
+                # 增量刷新真实频次（仅本次涉及码，异常不影响存档本身）
+                try:
+                    self.recalc_frequencies(codes=[c.strip() for c in code.split(",") if c.strip()])
+                except Exception:
+                    pass
+                return True
         return False
+
+    def recalc_frequencies(self, codes: Optional[List[str]] = None,
+                           days: int = 90, saturation: int = 20) -> int:
+        """
+        按诊断历史真实计数重算 real_frequency（近 days 天，多码逗号串拆开累加）
+
+        real_frequency = round(min(count, saturation) / saturation * 100)，
+        即单码在窗口内诊断 saturation 次即记满 100。frequency（合成 seed）不动，
+        排序时由调用方融合 0.7×real + 0.3×seed。
+
+        Args:
+            codes: 仅重算这些码（save_history 增量触发）；None 表示全量（迁移/手动）
+            days: 统计窗口天数（默认近 90 天）
+            saturation: 归一化封顶次数（默认 20 次记满）
+
+        Returns:
+            更新的行数
+        """
+        cutoff = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
+        wanted = {c.strip().upper() for c in codes} if codes else None
+
+        with self._write_lock:
+            conn = self.get_connection()
+            try:
+                cursor = conn.cursor()
+                # 显式指定码时先归零（历史可能已删除，避免 stale 残留）
+                if wanted is not None:
+                    for code in wanted:
+                        cursor.execute(
+                            "UPDATE obd_codes SET real_frequency = 0 WHERE code = ?", (code,)
+                        )
+                # 窗口内历史全扫（量级小），Python 侧拆逗号串累加，保证多码整行被计入
+                rows = cursor.execute(
+                    "SELECT code FROM diagnostic_history WHERE created_at >= ?", (cutoff,)
+                ).fetchall()
+
+                counts: Dict[str, int] = {}
+                for row in rows:
+                    raw = row["code"]
+                    for part in str(raw).split(","):
+                        part = part.strip().upper()
+                        if not part:
+                            continue
+                        if wanted is not None and part not in wanted:
+                            continue
+                        counts[part] = counts.get(part, 0) + 1
+
+                updated = 0
+                for code, cnt in counts.items():
+                    real = round(min(cnt, saturation) / saturation * 100)
+                    cursor.execute(
+                        "UPDATE obd_codes SET real_frequency = ? WHERE code = ?",
+                        (real, code),
+                    )
+                    if cursor.rowcount:
+                        updated += cursor.rowcount
+                conn.commit()
+                return updated
+            finally:
+                conn.close()
 
     def get_history(self, limit: int = 50) -> List[Dict[str, Any]]:
         """获取诊断历史记录"""

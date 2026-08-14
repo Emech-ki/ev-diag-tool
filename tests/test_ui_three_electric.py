@@ -16,7 +16,7 @@ from unittest.mock import patch, MagicMock
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from PyQt6.QtWidgets import QApplication
+from PyQt6.QtWidgets import QApplication, QPushButton, QLabel, QWidget
 from PyQt6.QtCore import Qt
 
 from src.engine.diagnostic import DiagnosticEngine
@@ -29,6 +29,33 @@ def _make_engine():
     engine.llm = MagicMock()
     engine.llm.is_available.return_value = False
     return engine
+
+
+_DARK_COLORS = {
+    "PRIMARY": "#42A5F5",
+    "PRIMARY_DARK": "#1565C0",
+    "PRIMARY_LIGHT": "#90CAF9",
+    "PRIMARY_BG": "#1A237E",
+    "ACCENT": "#B388FF",
+    "ACCENT_BG": "#311B92",
+    "BG": "#121218",
+    "CARD_BG": "#1E1E2A",
+    "CARD_BORDER": "#2D2D3F",
+    "TEXT_PRIMARY": "#E8E8EC",
+    "TEXT_SECONDARY": "#A0A0B4",
+    "TEXT_MUTED": "#6B6B80",
+    "INPUT_BG": "#252535",
+    "INPUT_BORDER": "#3D3D5C",
+    "INPUT_FOCUS": "#42A5F5",
+}
+
+
+def _find_button(layout, text):
+    for i in range(layout.count()):
+        w = layout.itemAt(i).widget()
+        if isinstance(w, QPushButton) and w.text() == text:
+            return w
+    return None
 
 
 class TestThreeElectricPanelInit(unittest.TestCase):
@@ -281,6 +308,124 @@ class TestThreeElectricPageTheme(unittest.TestCase):
 
     def test_panel_refresh_theme(self):
         self.panel.refresh_theme()  # 不应抛异常
+
+    @patch("src.ui.theme_helper.get_theme_colors", return_value=_DARK_COLORS)
+    def test_show_option_uses_dynamic_dark_colors(self, mock_colors):
+        """向导第 3 步动态控件取色必须随主题（深色 PRIMARY/TEXT_PRIMARY）"""
+        group = self.page._guide["symptom_groups"][0]
+        option = group["options"][0]
+        self.page._show_option(group, option)
+        btn = _find_button(self.page._wizard_body_layout, "开始诊断")
+        self.assertIsNotNone(btn)
+        self.assertIn(_DARK_COLORS["PRIMARY"], btn.styleSheet())
+        self.assertIn(_DARK_COLORS["PRIMARY_DARK"], btn.styleSheet())
+        label_ss = " ".join(
+            w.styleSheet()
+            for i in range(self.page._wizard_body_layout.count())
+            if (w := self.page._wizard_body_layout.itemAt(i).widget())
+            and isinstance(w, QLabel)
+            and "候选故障码" in w.text()
+        )
+        self.assertIn(_DARK_COLORS["TEXT_PRIMARY"], label_ss)
+
+    @patch("src.ui.theme_helper.get_theme_colors", return_value=_DARK_COLORS)
+    def test_reset_wizard_group_buttons_use_dark_colors(self, mock_colors):
+        """步骤 1 的现象按钮在深色主题下取深色卡片色"""
+        self.page.refresh_theme()
+        found = False
+        for i in range(self.page._wizard_body_layout.count()):
+            w = self.page._wizard_body_layout.itemAt(i).widget()
+            if isinstance(w, QPushButton):
+                self.assertIn(_DARK_COLORS["CARD_BG"], w.styleSheet())
+                self.assertIn(_DARK_COLORS["TEXT_PRIMARY"], w.styleSheet())
+                found = True
+        self.assertTrue(found)
+
+    @patch("src.ui.theme_helper.get_theme_colors", return_value=_DARK_COLORS)
+    def test_refresh_theme_rerenders_wizard_step_with_dark_colors(self, mock_colors):
+        """主题刷新后向导第 3 步重绘，按钮应用深色主题"""
+        group = self.page._guide["symptom_groups"][0]
+        option = group["options"][0]
+        self.page._show_option(group, option)
+        self.page.refresh_theme()
+        btn = _find_button(self.page._wizard_body_layout, "开始诊断")
+        self.assertIsNotNone(btn)
+        self.assertIn(_DARK_COLORS["PRIMARY"], btn.styleSheet())
+        label_ss = " ".join(
+            w.styleSheet()
+            for i in range(self.page._wizard_body_layout.count())
+            if (w := self.page._wizard_body_layout.itemAt(i).widget())
+            and isinstance(w, QLabel)
+            and "候选故障码" in w.text()
+        )
+        self.assertIn(_DARK_COLORS["TEXT_PRIMARY"], label_ss)
+
+    @patch("src.ui.theme_helper.get_theme_colors", return_value=_DARK_COLORS)
+    def test_inner_tabs_base_color_in_dark(self, mock_colors):
+        """内层 tab 基础样式必须含 color（深色 TEXT_SECONDARY），避免深色下黑字"""
+        self.page.refresh_theme()
+        ss = self.page._inner_tabs.styleSheet()
+        self.assertIn(f"color: {_DARK_COLORS['TEXT_SECONDARY']}", ss)
+        self.assertIn(f"color: {_DARK_COLORS['PRIMARY']}", ss)
+
+    @patch("src.ui.theme_helper.get_theme_colors", return_value=_DARK_COLORS)
+    def test_inner_tab_bar_no_black_text_in_dark(self, mock_colors):
+        """深色下渲染内层 tab 栏，断言无黑色文字像素（修复深底黑字）"""
+        self.page.refresh_theme()
+        self.page.resize(900, 600)
+        self.page.show()
+        QApplication.processEvents()
+        img = self.page._inner_tabs.tabBar().grab().toImage()
+        black = 0
+        for y in range(img.height()):
+            for x in range(img.width()):
+                c = img.pixelColor(x, y)
+                if c.red() < 20 and c.green() < 20 and c.blue() < 20:
+                    black += 1
+        self.page.close()
+        self.assertEqual(black, 0, "深色模式下 tab 栏出现黑色文字像素")
+
+    @patch("src.ui.theme_helper.get_theme_colors", return_value=_DARK_COLORS)
+    @patch("src.ui.theme_helper.get_symptom_colors", return_value={
+        "symptom_bg": "#1E2A1E",
+        "symptom_border": "#3D5C3D",
+        "symptom_title_color": "#66BB6A",
+        "symptom_text_color": "#A5D6A7",
+        "symptom_display_bg": "#253525",
+        "symptom_disabled": "#2E4A2E",
+    })
+    def test_no_light_residue_after_dark_refresh(self, mock_symptom, mock_colors):
+        """深色 refresh_theme 后，三电页全树不得残留浅色硬编码（如 #C5E1A5 保存按钮禁用态）"""
+        self.page.refresh_theme()
+        offenders = []
+        for w in [self.page] + self.page.findChildren(QWidget):
+            ss = w.styleSheet() or ""
+            if "#C5E1A5" in ss or "#8BC34A" in ss or "#F9FBE7" in ss:
+                offenders.append((type(w).__name__, getattr(w, "text", None) and w.text()))
+        self.assertEqual(offenders, [], f"深色主题下残留浅色样式: {offenders}")
+
+    @patch("src.ui.theme_helper.get_theme_colors", return_value=_DARK_COLORS)
+    def test_inner_pages_dark_background(self, mock_colors):
+        """深色下 快速排查/系统概览/诊断结果 页与外层滚动容器必须深色底（不得残留白底）"""
+        self.page.refresh_theme()
+        for w in (self.page._wizard_page, self.page._overview_page,
+                  self.page._result_page, self.page._page_content):
+            self.assertIn(_DARK_COLORS["CARD_BG"], w.styleSheet(),
+                          f"{type(w).__name__} 未应用深色底")
+
+    @patch("src.ui.theme_helper.get_theme_colors", return_value=_DARK_COLORS)
+    @patch("src.ui.theme_helper.get_symptom_colors", return_value={
+        "symptom_bg": "#1E2A1E",
+        "symptom_border": "#3D5C3D",
+        "symptom_title_color": "#66BB6A",
+        "symptom_text_color": "#A5D6A7",
+        "symptom_display_bg": "#253525",
+        "symptom_disabled": "#2E4A2E",
+    })
+    def test_result_panel_has_dark_background(self, mock_symptom, mock_colors):
+        """内嵌结果面板自身也必须深色底，避免诊断结果页露白"""
+        self.page.refresh_theme()
+        self.assertIn(_DARK_COLORS["CARD_BG"], self.page.result_panel.styleSheet())
 
 
 class TestThreeElectricPanelStopWorker(unittest.TestCase):

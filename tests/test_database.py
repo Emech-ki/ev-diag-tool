@@ -330,6 +330,159 @@ class TestDatabaseManager(unittest.TestCase):
         DatabaseManager._instance = None
         _cleanup_dir(temp_dir)
 
+    def test_real_frequency_column_migrates_on_old_table(self):
+        """老库缺 real_frequency 列时自动迁移补列（默认 0）"""
+        from src.database.db_manager import DatabaseManager
+
+        legacy_dir = tempfile.mkdtemp()
+        legacy_db = os.path.join(legacy_dir, "legacy.db")
+        legacy_table = """
+        CREATE TABLE obd_codes (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            code        TEXT NOT NULL,
+            system      TEXT NOT NULL,
+            code_type   TEXT DEFAULT 'generic',
+            description TEXT NOT NULL,
+            detail      TEXT DEFAULT '',
+            severity    TEXT DEFAULT 'medium',
+            common_causes    TEXT DEFAULT '[]',
+            diagnostic_steps TEXT DEFAULT '[]',
+            related_codes    TEXT DEFAULT '',
+            symptoms         TEXT DEFAULT '[]',
+            frequency        INTEGER DEFAULT 0
+        )
+        """
+        with sqlite3.connect(legacy_db) as conn:
+            conn.execute(legacy_table)
+            conn.execute("INSERT INTO obd_codes (code, system, description) VALUES ('EV-X-001', 'EV-X', 'x')")
+
+        DatabaseManager._instance = None
+        DatabaseManager._instance_lock = __import__('threading').Lock()
+        db = DatabaseManager(db_path=legacy_db)
+        conn = db.get_connection()
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(obd_codes)")}
+        conn.close()
+        self.assertIn("real_frequency", cols)
+        DatabaseManager._instance = None
+        with sqlite3.connect(legacy_db) as conn:
+            row = conn.execute("SELECT real_frequency FROM obd_codes WHERE code='EV-X-001'").fetchone()
+        self.assertEqual(row[0], 0)
+        _cleanup_dir(legacy_dir)
+
+    def test_get_codes_by_system_prefix_includes_real_frequency(self):
+        """系统前缀查询返回真实频次字段，未设置时为 0"""
+        from src.database.db_manager import DatabaseManager
+
+        temp_dir = tempfile.mkdtemp()
+        custom_db = os.path.join(temp_dir, "test.db")
+        conn = sqlite3.connect(custom_db)
+        conn.execute(CREATE_TABLE_OBD_CODES)
+        conn.commit()
+        conn.close()
+
+        DatabaseManager._instance = None
+        DatabaseManager._instance_lock = __import__('threading').Lock()
+        db = DatabaseManager(db_path=custom_db)
+        conn = db.get_connection()
+        conn.execute(
+            "INSERT INTO obd_codes (code, system, code_type, description, severity) "
+            "VALUES ('EV-X-001', 'EV-X', 'manufacturer', '测试', 'medium')"
+        )
+        conn.commit()
+        conn.close()
+
+        rows = db.get_codes_by_system_prefix("EV-X")
+        self.assertTrue(rows)
+        self.assertIn("real_frequency", rows[0])
+        self.assertEqual(rows[0]["real_frequency"], 0)
+
+        DatabaseManager._instance = None
+        _cleanup_dir(temp_dir)
+
+    def test_recalc_frequencies_single_code(self):
+        """真实频次重算：近 90 天单码计数归一化"""
+        for _ in range(5):
+            self.db.save_history(code="P0300", vehicle_info="比亚迪")
+        updated = self.db.recalc_frequencies(codes=["P0300"])
+        row = self.db.query_by_code("P0300")
+        self.assertGreaterEqual(updated, 1)
+        # 5 次 / 20 封顶 → 25%
+        self.assertEqual(row["real_frequency"], 25)
+
+    def test_recalc_frequencies_saturation_caps_at_100(self):
+        """真实频次超过封顶后记满 100"""
+        from datetime import datetime, timedelta
+        now = datetime.now()
+        conn = sqlite3.connect(self.db_path, timeout=30, isolation_level=None)
+        for _ in range(25):
+            conn.execute(
+                "INSERT INTO diagnostic_history (code, vehicle_info, created_at) VALUES (?, ?, ?)",
+                ("P0300", "比亚迪", now.strftime("%Y-%m-%d %H:%M:%S")),
+            )
+        conn.commit()
+        conn.close()
+        self.db.recalc_frequencies(codes=["P0300"])
+        row = self.db.query_by_code("P0300")
+        self.assertEqual(row["real_frequency"], 100)
+
+    def test_recalc_frequencies_multi_code_string_split(self):
+        """多码逗号串历史被拆开分别计入各码"""
+        from datetime import datetime
+        conn = sqlite3.connect(self.db_path, timeout=30, isolation_level=None)
+        for _ in range(4):
+            conn.execute(
+                "INSERT INTO diagnostic_history (code, vehicle_info, created_at) VALUES (?, ?, ?)",
+                ("P0300, B1100", "比亚迪", datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
+            )
+        conn.commit()
+        conn.close()
+        self.db.recalc_frequencies(codes=["P0300", "B1100"])
+        self.assertEqual(self.db.query_by_code("P0300")["real_frequency"], 20)
+        self.assertEqual(self.db.query_by_code("B1100")["real_frequency"], 20)
+
+    def test_recalc_frequencies_ignores_old_history(self):
+        """超过 90 天的历史不参与统计"""
+        from datetime import datetime, timedelta
+        old = (datetime.now() - timedelta(days=120)).strftime("%Y-%m-%d %H:%M:%S")
+        conn = sqlite3.connect(self.db_path, timeout=30, isolation_level=None)
+        conn.execute(
+            "INSERT INTO diagnostic_history (code, vehicle_info, created_at) VALUES (?, ?, ?)",
+            ("P0300", "比亚迪", old),
+        )
+        conn.commit()
+        conn.close()
+        updated = self.db.recalc_frequencies(codes=["P0300"])
+        self.assertEqual(updated, 0)
+        self.assertEqual(self.db.query_by_code("P0300")["real_frequency"], 0)
+
+    def test_recalc_frequencies_full_recalc(self):
+        """全量重算（codes=None）覆盖所有有历史的码"""
+        self.db.save_history(code="P0300", vehicle_info="比亚迪")
+        self.db.save_history(code="P0300", vehicle_info="比亚迪")
+        self.db.save_history(code="B1100", vehicle_info="特斯拉")
+        updated = self.db.recalc_frequencies()
+        self.assertGreaterEqual(updated, 2)
+        self.assertEqual(self.db.query_by_code("P0300")["real_frequency"], 10)
+        self.assertEqual(self.db.query_by_code("B1100")["real_frequency"], 5)
+
+    def test_save_history_triggers_incremental_recalc(self):
+        """save_history 自动增量刷新受影响码的真实频次"""
+        for _ in range(3):
+            self.db.save_history(code="P0300")
+        row = self.db.query_by_code("P0300")
+        self.assertEqual(row["real_frequency"], 15)
+        # 未涉及的码不受影响
+        self.assertEqual(self.db.query_by_code("B1100")["real_frequency"], 0)
+
+    def test_recalc_zeroes_stale_when_history_deleted(self):
+        """历史删除后，显式重算指定码应把残留频次归零（不 stale）"""
+        for _ in range(5):
+            self.db.save_history(code="P0300")
+        self.assertEqual(self.db.query_by_code("P0300")["real_frequency"], 25)
+        self.db.clear_history()
+        self.db.recalc_frequencies(codes=["P0300"])
+        self.assertEqual(self.db.query_by_code("P0300")["real_frequency"], 0)
+
 
 if __name__ == "__main__":
     unittest.main()

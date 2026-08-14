@@ -1,4 +1,4 @@
-# EV-Diag-Tool — AI 交接文档
+﻿# EV-Diag-Tool — AI 交接文档
 
 新能源汽车 OBD-II 智能故障码诊断工具（PyQt6 桌面应用），面向维修技师。定位：知识库给"标准答案"，AI 给"排查建议"，AI 不武断下结论。
 
@@ -39,7 +39,7 @@ python scripts/seed_db.py    # 初始化数据库（9129 码 + 45 车型）
 python scripts/synthesize_ev_details.py   # EV 码详情确定性生成（无需 Ollama）
 python scripts/generate_ev_system_codes.py --sync-db   # DB 详情回写 CSV
 python src/main.py           # 运行程序
-pytest tests/                # 598 个测试
+pytest tests/                # 620 个测试
 pytest tests/ --cov=src --cov-report=term-missing  # 覆盖率 75%（逻辑层 85%+）
 python scripts/verify_features.py   # 端到端验证（需 Ollama 在线，45 项）
 ```
@@ -78,8 +78,8 @@ python scripts/verify_features.py   # 端到端验证（需 Ollama 在线，45 �
 
 ## 当前状态
 
-- **版本**：v3.6.0（三电置信度与频次排序增强）
-- **测试**：598 个全部通过（含 UI 测试、export_as_pdf 4 个）
+- **版本**：v3.6.1（真实频次融合与概览配额均衡）
+- **测试**：620 个全部通过（含 UI 测试、export_as_pdf 4 个）
 - **数据库**：9129 故障码（EV 系统码 400 条 100% 有详情，各系统 50 条；P/B/C/U 详情部分覆盖）+ 45 车型
 - **AI 配置**：`.env` 指向本地 Ollama `qwen2.5:7b`
 - **打包**：`pyinstaller EV-Diag-Tool.spec --noconfirm`（spec 内改 name 为当前版本号）

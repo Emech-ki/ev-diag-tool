@@ -50,6 +50,14 @@ THREE_ELECTRIC = {
 
 GENERAL_EXPERT_NAME = "通用诊断专家"
 
+# 概览"常见故障"排序与配额（v3.6.1 可调常量）
+# 融合频次 = 0.7×真实频次 + 0.3×合成频次（0-100 加权）
+FREQ_REAL_WEIGHT = 0.7
+FREQ_SEED_WEIGHT = 0.3
+OVERVIEW_QUOTA = {"battery": 5, "motor": 3, "vcu": 2}  # 常见故障每子系统席位上限
+OVERVIEW_PER_SYSTEM = 1  # 每个系统前缀（EV-BMS/EV-HV/...）至多占位数，保证跨系统均衡
+OVERVIEW_TOP_N = 10  # 概览常见故障总数上限
+
 _GUIDE_CACHE = None
 _GUIDE_PATH = Path(__file__).resolve().parent.parent.parent / "data" / "seed" / "three_electric_guide.json"
 
@@ -193,17 +201,36 @@ def build_overview(kb: KnowledgeBase, subsystem: str) -> Dict[str, Any]:
 
     common = []
     try:
-        # 逐个系统前缀查询，过滤 + 按严重度优先、频次加权排序取前 10
+        # 逐个系统前缀查询，融合频次排序 + 系统额度/子系统配额取前 10
         sev_order = {"critical": 0, "high": 1, "medium": 2, "low": 3}
-        filtered = []
+        quota = dict(OVERVIEW_QUOTA)
+        used_prefix = {}
+        picked = []
         for sys_name in info["systems"]:
             rows = kb.get_codes_by_system_prefix(sys_name, limit=50)
-            filtered.extend(rows)
-        filtered.sort(key=lambda r: (
-            sev_order.get(r.get("severity", "low"), 9),
-            -int(r.get("frequency", 0) or 0),
+            sub = get_subsystem_for_system(sys_name)
+            picked.extend((r, sub, sys_name) for r in rows)
+        # 严重度主键 + 融合频次(-)次键；同分按码序稳定
+        picked.sort(key=lambda t: (
+            sev_order.get(t[0].get("severity", "low"), 9),
+            -(FREQ_REAL_WEIGHT * int(t[0].get("real_frequency", 0) or 0)
+              + FREQ_SEED_WEIGHT * int(t[0].get("frequency", 0) or 0)),
+            t[0].get("code", ""),
         ))
-        common = filtered[:10]
+        # 双约束选取：子系统总配额（battery≤5...）+ 每系统前缀额度（默认 1 席）保证均衡
+        for row, sub, prefix in picked:
+            if sub is None:
+                continue
+            if quota.get(sub, 0) <= 0:
+                continue
+            if used_prefix.get(prefix, 0) >= OVERVIEW_PER_SYSTEM:
+                continue
+            common.append(row)
+            quota[sub] -= 1
+            used_prefix[prefix] = used_prefix.get(prefix, 0) + 1
+            if len(common) >= OVERVIEW_TOP_N:
+                break
+        common = common[:OVERVIEW_TOP_N]
     except (KeyError, TypeError, AttributeError) as e:
         logger.debug(f"build_overview common_codes 查询失败: {e}")
         common = []

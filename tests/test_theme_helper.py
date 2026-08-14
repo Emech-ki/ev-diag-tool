@@ -64,7 +64,7 @@ class TestGetSymptomColors(unittest.TestCase):
         result = get_symptom_colors()
         required = [
             "symptom_bg", "symptom_border", "symptom_title_color",
-            "symptom_text_color", "symptom_display_bg",
+            "symptom_text_color", "symptom_display_bg", "symptom_disabled",
         ]
         for key in required:
             self.assertIn(key, result, f"Missing key: {key}")
@@ -76,6 +76,7 @@ class TestGetSymptomColors(unittest.TestCase):
             self.assertEqual(result["symptom_bg"], "#F9FBE7")
             self.assertEqual(result["symptom_border"], "#E6EE9C")
             self.assertEqual(result["symptom_title_color"], "#558B2F")
+            self.assertEqual(result["symptom_disabled"], "#C5E1A5")
 
     def test_dark_theme_values(self):
         """深色主题返回深色背景"""
@@ -84,6 +85,7 @@ class TestGetSymptomColors(unittest.TestCase):
             self.assertEqual(result["symptom_bg"], "#1E2A1E")
             self.assertEqual(result["symptom_border"], "#3D5C3D")
             self.assertEqual(result["symptom_title_color"], "#66BB6A")
+            self.assertEqual(result["symptom_disabled"], "#2E4A2E")
 
     def test_values_are_strings(self):
         result = get_symptom_colors()

@@ -17,7 +17,7 @@
               },
               {
                 "code": "EV-OBC-021",
-                "weight": 85
+                "weight": 90
               },
               {
                 "code": "EV-OBC-023",
@@ -25,7 +25,7 @@
               },
               {
                 "code": "EV-OBC-019",
-                "weight": 55
+                "weight": 60
               }
             ]
           },
@@ -46,7 +46,7 @@
               },
               {
                 "code": "EV-OBC-010",
-                "weight": 55
+                "weight": 65
               }
             ]
           },
@@ -63,11 +63,11 @@
               },
               {
                 "code": "EV-OBC-018",
-                "weight": 70
+                "weight": 80
               },
               {
                 "code": "EV-OBC-024",
-                "weight": 55
+                "weight": 70
               }
             ]
           }
@@ -155,7 +155,7 @@
               },
               {
                 "code": "EV-HV-001",
-                "weight": 85
+                "weight": 90
               },
               {
                 "code": "EV-BMS-038",
@@ -201,7 +201,7 @@
               },
               {
                 "code": "EV-BMS-018",
-                "weight": 70
+                "weight": 85
               },
               {
                 "code": "EV-BMS-023",
@@ -255,7 +255,7 @@
               },
               {
                 "code": "EV-THERMAL-040",
-                "weight": 55
+                "weight": 65
               }
             ]
           },
@@ -349,7 +349,7 @@
               },
               {
                 "code": "EV-MOTOR-037",
-                "weight": 55
+                "weight": 65
               }
             ]
           }
@@ -370,7 +370,7 @@
               },
               {
                 "code": "EV-MOTOR-029",
-                "weight": 85
+                "weight": 90
               },
               {
                 "code": "EV-MOTOR-040",
@@ -577,7 +577,7 @@
               },
               {
                 "code": "EV-VCU-017",
-                "weight": 55
+                "weight": 65
               }
             ]
           },
@@ -703,7 +703,7 @@
               },
               {
                 "code": "EV-VCU-005",
-                "weight": 55
+                "weight": 70
               }
             ]
           },

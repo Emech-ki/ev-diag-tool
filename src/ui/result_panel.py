@@ -17,6 +17,7 @@ from PyQt6.QtGui import QTextCursor
 from src.engine.diagnostic import DiagnosticResult
 from src.engine.knowledge_base import KnowledgeBase
 from src.ui.markdown_renderer import md_to_html
+from src.ui.theme_helper import get_symptom_colors
 from src.ui.styles import (
     PRIMARY, PRIMARY_DARK, PRIMARY_BG, CARD_BG, CARD_BORDER,
     TEXT_PRIMARY, TEXT_SECONDARY, TEXT_MUTED, BG, FONT_MONO,
@@ -51,6 +52,7 @@ class ResultPanel(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(8)
+        self.setStyleSheet(f"background-color: {CARD_BG};")
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
         self._splitter = splitter
@@ -194,15 +196,16 @@ class ResultPanel(QWidget):
 
         self.symptom_btn = QPushButton("保存")
         self.symptom_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.symptom_btn.setStyleSheet("""
-            QPushButton {
+        _sc = get_symptom_colors()
+        self.symptom_btn.setStyleSheet(f"""
+            QPushButton {{
                 font-size: 13px; font-weight: bold;
-                background-color: #8BC34A; color: white;
+                background-color: {_sc['symptom_title_color']}; color: white;
                 border: none; border-radius: 6px;
                 padding: 4px 20px; min-height: 32px;
-            }
-            QPushButton:hover { background-color: #7CB342; }
-            QPushButton:disabled { background-color: #C5E1A5; }
+            }}
+            QPushButton:hover {{ background-color: {PRIMARY}; }}
+            QPushButton:disabled {{ background-color: {_sc['symptom_disabled']}; }}
         """)
         self.symptom_btn.clicked.connect(self._on_save_symptom)
         self.symptom_btn.setEnabled(False)
@@ -575,6 +578,9 @@ class ResultPanel(QWidget):
         c = get_theme_colors()
         sc = get_symptom_colors()
 
+        # 面板底色（深色下不残留白底）
+        self.setStyleSheet(f"background-color: {c['CARD_BG']};")
+
         # 分隔条
         self._splitter.setStyleSheet(f"""
             QSplitter::handle {{
@@ -660,7 +666,7 @@ class ResultPanel(QWidget):
                 padding: 4px 20px; min-height: 32px;
             }}
             QPushButton:hover {{ background-color: {c['PRIMARY']}; }}
-            QPushButton:disabled {{ background-color: #C5E1A5; }}
+            QPushButton:disabled {{ background-color: {sc['symptom_disabled']}; }}
         """)
 
         # 如果有当前结果，重新渲染

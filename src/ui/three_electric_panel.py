@@ -87,10 +87,11 @@ class ElectricSystemPage(QWidget):
         self._page_scroll = QScrollArea()
         self._page_scroll.setWidgetResizable(True)
         self._page_scroll.setStyleSheet("QScrollArea { background-color: transparent; border: none; }")
-        page_content = QWidget()
-        self._page_scroll.setWidget(page_content)
+        self._page_content = QWidget()
+        self._page_content.setStyleSheet(f"background-color: {CARD_BG};")
+        self._page_scroll.setWidget(self._page_content)
 
-        outer = QVBoxLayout(page_content)
+        outer = QVBoxLayout(self._page_content)
         outer.setContentsMargins(16, 16, 16, 16)
         outer.setSpacing(12)
 
@@ -144,7 +145,7 @@ class ElectricSystemPage(QWidget):
             QTabBar::tab {{
                 padding: 8px 16px; font-size: 13px;
                 border: 1px solid transparent;
-                border-bottom: none;
+                border-bottom: none; color: {TEXT_SECONDARY};
             }}
             QTabBar::tab:selected {{
                 background-color: {CARD_BG};
@@ -160,8 +161,9 @@ class ElectricSystemPage(QWidget):
         self._inner_tabs.setMinimumHeight(460)
 
         # ── Tab 1：快速排查（向导） ──
-        wizard_page = QWidget()
-        wizard_layout = QVBoxLayout(wizard_page)
+        self._wizard_page = QWidget()
+        self._wizard_page.setStyleSheet(f"background-color: {CARD_BG};")
+        wizard_layout = QVBoxLayout(self._wizard_page)
         wizard_layout.setContentsMargins(16, 16, 16, 16)
         wizard_layout.setSpacing(10)
 
@@ -180,11 +182,12 @@ class ElectricSystemPage(QWidget):
         self._wizard_body_layout.setSpacing(6)
         wizard_layout.addWidget(self._wizard_body)
 
-        self._inner_tabs.addTab(wizard_page, "快速排查")
+        self._inner_tabs.addTab(self._wizard_page, "快速排查")
 
         # ── Tab 2：系统概览 ──
-        overview_page = QWidget()
-        ov_layout = QVBoxLayout(overview_page)
+        self._overview_page = QWidget()
+        self._overview_page.setStyleSheet(f"background-color: {CARD_BG};")
+        ov_layout = QVBoxLayout(self._overview_page)
         ov_layout.setContentsMargins(0, 0, 0, 0)
 
         self._overview_scroll = QScrollArea()
@@ -232,11 +235,12 @@ class ElectricSystemPage(QWidget):
         ov_scroll_layout.addStretch()
         self._overview_scroll.setWidget(ov_container)
         ov_layout.addWidget(self._overview_scroll)
-        self._inner_tabs.addTab(overview_page, "系统概览")
+        self._inner_tabs.addTab(self._overview_page, "系统概览")
 
         # ── Tab 3：诊断结果（内嵌 ResultPanel，全高） ──
-        result_page = QWidget()
-        result_layout = QVBoxLayout(result_page)
+        self._result_page = QWidget()
+        self._result_page.setStyleSheet(f"background-color: {CARD_BG};")
+        result_layout = QVBoxLayout(self._result_page)
         result_layout.setContentsMargins(0, 0, 0, 0)
         result_layout.setSpacing(0)
 
@@ -244,7 +248,7 @@ class ElectricSystemPage(QWidget):
         self.result_panel.diagnose_requested.connect(self._on_related_code_clicked)
         self.result_panel.export_requested.connect(self._on_export)
         result_layout.addWidget(self.result_panel, 1)
-        self._inner_tabs.addTab(result_page, "诊断结果")
+        self._inner_tabs.addTab(self._result_page, "诊断结果")
 
         self._render_overview()
         self._render_stats()
@@ -321,7 +325,7 @@ class ElectricSystemPage(QWidget):
         groups = self._guide.get("symptom_groups", [])
         if not groups:
             tip = QLabel("该子系统暂无向导数据")
-            tip.setStyleSheet(f"font-size: 12px; color: {TEXT_MUTED};")
+            tip.setStyleSheet(f"font-size: 12px; color: {self._get_colors()['TEXT_MUTED']};")
             self._wizard_body_layout.addWidget(tip)
             return
 
@@ -370,7 +374,7 @@ class ElectricSystemPage(QWidget):
         codes_label = QLabel(f"候选故障码：{chips}")
         codes_label.setTextFormat(Qt.TextFormat.RichText)
         codes_label.setWordWrap(True)
-        codes_label.setStyleSheet(f"font-size: 13px; color: {TEXT_PRIMARY};")
+        codes_label.setStyleSheet(f"font-size: 13px; color: {c['TEXT_PRIMARY']};")
         self._wizard_body_layout.addWidget(codes_label)
 
         diagnose_btn = QPushButton("开始诊断")
@@ -378,11 +382,11 @@ class ElectricSystemPage(QWidget):
         diagnose_btn.setStyleSheet(f"""
             QPushButton {{
                 font-size: 14px; font-weight: bold;
-                background-color: {PRIMARY}; color: white;
+                background-color: {c['PRIMARY']}; color: white;
                 border: none; border-radius: 8px;
                 padding: 4px 24px; min-height: 34px;
             }}
-            QPushButton:hover {{ background-color: {PRIMARY_DARK}; }}
+            QPushButton:hover {{ background-color: {c['PRIMARY_DARK']}; }}
             QPushButton:disabled {{ background-color: #90CAF9; }}
         """)
         diagnose_btn.clicked.connect(lambda: self._start_diagnosis(codes))
@@ -635,6 +639,11 @@ class ElectricSystemPage(QWidget):
             }}
         """)
 
+        self._page_content.setStyleSheet(f"background-color: {c['CARD_BG']};")
+        self._wizard_page.setStyleSheet(f"background-color: {c['CARD_BG']};")
+        self._overview_page.setStyleSheet(f"background-color: {c['CARD_BG']};")
+        self._result_page.setStyleSheet(f"background-color: {c['CARD_BG']};")
+
         self._step_label.setStyleSheet(f"font-size: 13px; font-weight: bold; color: {c['PRIMARY']};")
         self._wizard_hint.setStyleSheet(f"font-size: 12px; color: {c['TEXT_MUTED']};")
 
@@ -652,6 +661,16 @@ class ElectricSystemPage(QWidget):
 
         self.result_panel.refresh_theme()
         self._render_overview()
+
+        # 重绘向导当前步骤，让动态创建的按钮/标签应用新主题
+        self._clear_wizard_body()
+        if self._current_option is not None and self._current_group is not None:
+            self._show_option(self._current_group, self._current_option)
+        elif self._current_group is not None:
+            self._show_group(self._current_group)
+        else:
+            self._reset_wizard()
+        self._wizard_body.setEnabled(self.worker is None or not self.worker.isRunning())
 
 
 class ThreeElectricPanel(QWidget):

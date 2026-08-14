@@ -1,201 +1,6 @@
-# EV-Diag-Tool | 新能源汽车智能诊断工具
+﻿# EV-Diag-Tool | 新能源汽车智能诊断工具
 
-> **"不武断下结论，而是帮你一步步排查"**
-
-一个面向维修技师的 **OBD-II 智能故障码诊断工具**，结合本地知识库 + AI 大模型，帮助快速定位新能源汽车故障点。
-
----
-
-## 项目状态
-
-| 指标 | 数值 |
-|------|------|
-| **版本** | v3.6.0 |
-| **测试** | 598 个全部通过 |
-| **覆盖率** | 75%（逻辑层 85%+） |
-| **故障码** | 9129 条（100% 中文） |
-| **详细信息覆盖** | EV 系统码 400 条 100% 有详情；P/B/C/U 部分覆盖（以当前 DB 为准） |
-| **车型数据** | 45 款 / 18 品牌 |
-
----
-
-## 项目定位
-
-| 项目维度 | 决策内容 |
-|---------|---------|
-| **目标用户** | 新能源汽车维修技师 |
-| **解决问题** | 通过 OBD-II 故障码快速定位故障原因，给出排查步骤 |
-| **核心原则** | 知识库信息是确定的，AI 建议是辅助参考，两者明确区分 |
-| **发布方式** | Windows exe + GitHub 开源 |
-| **交付形态** | PyQt6 桌面应用 |
-
-### 核心理念
-
-> 就像一位经验丰富的维修老师傅：
-> 1. 你先告诉我故障码（症状）
-> 2. 我查手册告诉你标准答案（知识库）
-> 3. 我再结合经验给你一些排查建议（AI 辅助）
-> 4. 但我不会直接说"换某某零件"——而是告诉你"先检查这个，再测试那个"
-
----
-
-## 快速开始
-
-### 前置条件
-
-```bash
-# 1. 安装 Python 3.10+
-#    下载: https://www.python.org/downloads/
-
-# 2. 安装 Ollama
-#    下载: https://ollama.com/
-#    拉取推荐模型:
-ollama pull qwen2.5:7b
-
-# 3. 验证 Ollama 可用:
-ollama run qwen2.5:7b
-# 输入: "你好" 测试是否正常工作
-```
-
-### 安装与运行
-
-```bash
-# 1. 克隆项目
-git clone https://github.com/Emech-ki/ev-diag-tool.git
-cd ev-diag-tool
-
-# 2. 创建虚拟环境
-python -m venv venv
-# Windows:
-.\venv\Scripts\activate
-
-# 3. 安装依赖
-pip install -r requirements.txt
-
-# 4. 初始化数据库（导入种子数据）
-python scripts/seed_db.py
-
-# 5. 运行程序
-python src/main.py
-```
-
-### 常用命令
-
-```bash
-python scripts/seed_db.py    # 初始化数据库（含新能源码+车型数据）
-python src/main.py           # 运行程序
-pytest tests/                # 运行测试（598个测试）
-```
-
-### 打包成 exe
-
-```bash
-pip install pyinstaller
-pyinstaller EV-Diag-Tool.spec --noconfirm
-# 生成的 exe 在 dist/ 目录下（名称含版本号，如 EV-Diag-Tool_v3.4.3.exe）
-# 打包前请修改 EV-Diag-Tool.spec 中的 name 字段为当前版本
-```
-
----
-
-## 技术栈
-
-| 技术 | 用途 | 备注 |
-|-----|------|------|
-| **Python 3.10+** | 编程语言 | 主流版本 |
-| **PyQt6** | 桌面 GUI | 功能强大，原生质感 |
-| **SQLite** | 本地数据库 | 零配置，单文件 |
-| **Ollama** | 本地大模型推理 | 免费，隐私保障 |
-| **qwen2.5:7b / llama3.2:3b** | LLM 模型 | 推荐模型，3060可跑 |
-| **PyInstaller** | 打包 exe | 最终分发 |
-
-### 开发环境
-
-| 硬件 | 配置 |
-|-----|------|
-| CPU | AMD Ryzen 5 5800H (8C/16T) |
-| GPU | NVIDIA RTX 3060 (6GB VRAM) |
-| RAM | 16GB |
-| OS | Windows 11 |
-
----
-
-## 系统架构（三层）
-
-```
-┌─────────────────────────────────────────────┐
-│            用户界面层 (PyQt6)                 │
-│  ┌──────────┐  ┌──────────┐  ┌───────────┐  │
-│  │ 故障码输入 │  │ 诊断结果显示│  │ AI对话面板│  │
-│  └─────┬────┘  └─────┬────┘  └─────┬─────┘  │
-├────────┼──────────────┼──────────────┼──────┤
-│        ▼              ▼              ▼       │
-│           业务逻辑层                          │
-│  ┌────────────────┐  ┌──────────────────┐   │
-│  │  诊断引擎       │  │  AI 服务层       │   │
-│  │  (知识库查询 +  │  │  (方案B LLM增强  │   │
-│  │   推理排序)     │  │  + 方案C Agent)  │   │
-│  └────────┬───────┘  └────────┬─────────┘   │
-├───────────┼───────────────────┼────────────┤
-│           ▼                   ▼              │
-│             数据层                            │
-│  ┌──────────────────┐  ┌───────────────┐    │
-│  │  SQLite 本地数据库 │  │  Ollama 本地   │    │
-│  │  (OBD故障码知识库) │  │  大模型       │    │
-│  └──────────────────┘  └───────────────┘    │
-└──────────────────────────────────────────────┘
-```
-
----
-
-## AI 架构
-
-### Provider 抽象层
-
-- **Provider 接口**: `src/ai/providers/__init__.py` — `LLMProvider` 抽象基类
-- **OllamaProvider**: `src/ai/providers/ollama.py` — Ollama HTTP API（支持 tool calling）
-- **OpenAICompatProvider**: `src/ai/providers/openai_compat.py` — OpenAI 兼容 API
-- **LLMClient 代理**: `src/ai/llm_client.py` — 根据配置选择 provider，`threading.Lock` 保护切换
-
-### 多端点配置
-
-`.env` 中配置 `OPENAI_ENDPOINT_1_NAME/URL/KEY/MODEL`，支持多个端点。品牌栏下拉框"本地模型 / DeepSeek / OpenAI"一键切换。
-
-### AI 方案
-
-**方案B — LLM 增强诊断：**
-- 输入故障码 + 车型 + 附加描述
-- LLM 生成结构化的诊断建议
-- 界面清晰标注"AI建议，仅供参考"
-
-**方案C — AI Agent 交互诊断：**
-- 基于 Tool Calling 让 Agent 访问数据库
-- 多 Agent 协作（BMS/电机/热管理专家）
-- 维护诊断会话上下文，主动提问引导排查
-
-### Agent 核心架构（ReAct 模式）
-
-```
-用户消息 → Agent.run_stream()  (流式入口)
-              │
-              ├── 尝试 chat_with_tools_stream（流式 Tool Calling）
-              │       │
-              │       ├── 有 tool_calls → 流式 ReAct 循环
-              │       │       ├── 执行工具 → on_tool_call() → UI 显示中间状态
-              │       │       ├── 下一轮 LLM 流式调用 → 逐 token yield
-              │       │       └── 无 tool_calls → 最终回答 → done
-              │       │
-              │       └── 无 tool_calls → 直接 yield 最终回答 → done
-              │
-              └── 降级: _run_with_prefetch() + 普通流式 chat
-```
-
-### Prompt 特性
-
-- 支持 few-shot 示例、CoT 推理
-- 严重程度自适应（高危故障码加强安全提醒）
-- 新能源安全提醒（高压系统操作警告）
-- 专家角色声明（电池/电机/电控专家路由）
+面向维修技师的 **OBD-II 智能故障码诊断工具**：本地知识库给"标准答案"，AI 给"排查建议"，两者明确区分，帮助快速定位新能源汽车故障点。
 
 ---
 
@@ -203,42 +8,100 @@ pyinstaller EV-Diag-Tool.spec --noconfirm
 
 | 功能 | 说明 |
 |------|------|
-| **故障码查询** | 支持 P/B/C/U 系列 + EV 系统码，共 9129 条故障码 |
+| **故障码查询** | 支持 P/B/C/U 系列 + EV 系统码，共 9129 条 |
 | **AI 诊断建议** | 支持 Ollama 本地模型 + OpenAI 兼容 API |
 | **AI Agent 对话** | 流式 Tool Calling，对话式排查引导 |
-| **多 Agent 协作** | 专家路由系统（电池/电机/电控/通用） |
-| **多故障码分析** | 自动识别多个故障码，综合分析因果关系 |
+| **专家路由** | 电池/电机/电控/通用 多 Agent 协作 |
+| **多故障码分析** | 自动识别多个故障码，综合分析 |
+| **三电诊断** | 电池/电机/电控领域向导 + 系统覆盖概览 |
 | **深色模式** | 主题切换，持久化到 .env |
-| **诊断结果导出** | 支持 txt/html/pdf 格式（PDF 用 reportlab） |
-| **诊断历史** | 记录历史诊断，支持搜索和导出 |
-| **批量数据增强** | AI 批量生成故障码详细诊断信息 |
+| **诊断结果导出** | txt / html / pdf |
+| **诊断历史** | 记录、搜索、导出历史诊断 |
+
+## 项目状态
+
+| 指标 | 数值 |
+|------|------|
+| 版本 | v3.6.1 |
+| 测试 | 620 个全部通过 |
+| 故障码 | 9129 条（100% 中文），EV 系统码 400 条 100% 有详情 |
+| 车型数据 | 45 款 / 18 品牌 |
 
 ---
 
-## OBD-II 故障码结构说明
+## 快速开始
 
-```
-     P    0     300
-     │    │     └── 具体故障编号
-     │    └── 0=通用故障码, 1=厂商自定义
-     └── 系统类别:
-         P = Powertrain (动力总成/发动机)
-         B = Body (车身)
-         C = Chassis (底盘)
-         U = Network (网络通讯)
+### 前置条件
+
+- Python 3.10+
+- [Ollama](https://ollama.com/)，并拉取推荐模型：
+
+```bash
+ollama pull qwen2.5:7b
 ```
 
-### 当前覆盖的故障码范围
+### 安装与运行
 
-| 类别 | 数量 | 说明 |
-|-----|------|------|
-| P-codes (动力总成) | 6553 | 标准中文描述；详情部分覆盖 |
-| U-codes (网络通讯) | 1231 | 标准中文描述；详情部分覆盖 |
-| C-codes (底盘) | 525 | 标准中文描述；详情部分覆盖 |
-| B-codes (车身) | 360 | 标准中文描述；详情部分覆盖 |
-| EV-codes (新能源标准) | 60 | 中文详细（P0Axx 系列） |
-| EV System-codes (新能源系统) | 400 | 100% 中文详情（BMS/高压/OBC/DC-DC/热管理/电机/再生制动/电控 VCU） |
-| **合计** | **9129** | EV 系统码 400 条 100% 有详情；P/B/C/U 详情以当前 DB 为准 |
+```bash
+git clone https://github.com/Emech-ki/ev-diag-tool.git
+cd ev-diag-tool
+
+python -m venv venv
+# Windows: .\venv\Scripts\activate
+
+pip install -r requirements.txt
+python scripts/seed_db.py   # 初始化数据库
+python src/main.py          # 运行程序
+```
+
+### 常用命令
+
+```bash
+python scripts/seed_db.py    # 初始化数据库
+python src/main.py           # 运行程序
+pytest tests/                # 运行测试（620 个）
+```
+
+### 打包成 exe
+
+```bash
+pip install pyinstaller
+pyinstaller EV-Diag-Tool.spec --noconfirm
+```
+
+生成的 exe 在 `dist/` 目录下。打包前请把 `EV-Diag-Tool.spec` 中的 `name` 改为当前版本号。
+
+## 配置说明
+
+程序读取根目录 `.env`（参考 `.env.example`）：
+
+- **服务商**：`AI_PROVIDER=ollama|openai`
+- **本地模型**：`OLLAMA_BASE_URL`、`OLLAMA_MODEL_NAME`
+- **多端点**：`OPENAI_ENDPOINT_1_NAME/URL/KEY/MODEL`，可配置多个端点，品牌栏一键切换
+- **主题**：`THEME=light|dark`（界面内切换会持久化到 .env）
+
+---
+
+## 技术栈
+
+| 技术 | 用途 |
+|-----|------|
+| Python 3.10+ | 编程语言 |
+| PyQt6 | 桌面 GUI |
+| SQLite | 本地数据库（零配置、单文件） |
+| Ollama | 本地大模型推理 |
+| PyInstaller | 打包 exe |
+
+## OBD-II 故障码结构
+
+```
+P 0 300
+│ │ └── 具体故障编号
+│ └── 0=通用故障码, 1=厂商自定义
+└── 系统类别: P=动力总成 B=车身 C=底盘 U=网络通讯
+```
+
+另支持新能源系统码 `EV-XXX-NNN`（如 `EV-BMS-001`）。当前覆盖：P 6553 / U 1231 / C 525 / B 360 / EV 60 / EV 系统码 400。
 
 ---
 
@@ -246,231 +109,32 @@ pyinstaller EV-Diag-Tool.spec --noconfirm
 
 ```
 ev-diag-tool/
-├── README.md                 # 项目文档（本文件）
-├── requirements.txt          # Python 依赖清单
-├── .env.example             # 环境变量模板
-│
-├── data/                     # 数据文件
-│   ├── seed/                 # 种子数据
-│   │   ├── p_codes.csv       # P系列故障码（动力总成）
-│   │   ├── b_codes.csv       # B系列故障码（车身）
-│   │   ├── c_codes.csv       # C系列故障码（底盘）
-│   │   ├── u_codes.csv       # U系列故障码（网络通讯）
-│   │   ├── ev_codes.csv      # 新能源专用故障码
-│   │   ├── ev_system_codes.csv # EV 系统码（BMS/HV/OBC/DC-DC/热管理/电机/再生制动/VCU）
-│   │   ├── three_electric_guide.json # 三电诊断向导数据
-│   │   └── expert_context.json # AI 专家领域定义
-│   └── obd_codes.db          # SQLite数据库（运行时生成）
-│
-├── src/                      # 源代码
-│   ├── main.py               # 程序入口
-│   ├── config.py             # 配置管理
-│   ├── version.py            # 版本信息
-│   ├── ui/                   # 界面层
-│   │   ├── main_window.py    # 主窗口
-│   │   ├── result_panel.py   # 结果展示面板
-│   │   ├── agent_chat.py     # AI Agent对话面板
-│   │   ├── three_electric_panel.py # 三电诊断面板
-│   │   ├── history_panel.py  # 诊断历史面板
-│   │   ├── export_utils.py   # 诊断结果导出（txt/html/pdf）
-│   │   ├── markdown_renderer.py # Markdown渲染器
-│   │   ├── theme_helper.py   # 主题辅助模块
-│   │   ├── styles/           # 设计令牌（深色/浅色主题）
-│   │   └── add_endpoint_dialog.py # 添加端点对话框
-│   ├── database/             # 数据库层
-│   │   ├── db_manager.py     # 数据库管理
-│   │   └── schema.py         # 表结构定义
-│   ├── engine/               # 诊断引擎
-│   │   ├── diagnostic.py     # 诊断流程控制
-│   │   ├── three_electric.py # 三电领域定义与概览统计
-│   │   └── knowledge_base.py # 知识库查询
-│   └── ai/                   # AI服务层
-│       ├── llm_client.py     # LLM API客户端
-│       ├── prompt_templates.py # 提示词模板
-│       ├── agent.py          # AI Agent实现
-│       ├── tools.py          # 工具调用框架
-│       ├── diagnostic_tools.py # 诊断工具集
-│       └── providers/        # LLM Provider抽象层
-│
-├── scripts/                  # 工具脚本
-│   ├── seed_db.py            # 数据库初始化
-│   ├── batch_enhance_codes.py # 批量增强脚本
-│   └── ...
-│
-└── tests/                    # 单元测试（598个）
-    ├── test_database.py
-    ├── test_engine.py
-    ├── test_ai.py
-    ├── test_providers.py
-    └── test_export_and_markdown.py
+├── README.md             # 项目文档
+├── CONTRIBUTING.md       # 贡献指南与代码规范
+├── CHANGELOG.md          # 版本历史
+├── requirements.txt
+├── .env.example          # 环境变量模板
+├── data/seed/            # 种子数据（CSV + 三电向导 JSON）
+├── src/
+│   ├── main.py           # 程序入口
+│   ├── ui/               # PyQt6 界面层
+│   ├── database/         # SQLite 数据层
+│   ├── engine/           # 诊断引擎（含三电领域）
+│   └── ai/               # AI 服务层（Provider/Agent/工具）
+├── scripts/              # 工具脚本（建库、增强、验证）
+└── tests/                # 单元测试
 ```
 
 ---
 
-## 代码规范
+## 贡献
 
-- 中文注释和文档
-- 线程安全：UI 更新必须在主线程，耗时操作用 QThread
-- HTML 转义：所有用户/知识库数据插入 HTML 前必须 `html.escape()`
-- 流式渲染：token 级 HTML 处理需考虑跨 token 边界的 markdown 标记
-- Provider 切换：必须持有 `threading.Lock` 保护 `_provider` 赋值
-- Worker 生命周期：`quit()` + `wait()` 超时后必须 `terminate()`
+欢迎提交 Issue、补充故障码数据、改进诊断逻辑。详见 [CONTRIBUTING.md](CONTRIBUTING.md)。
 
----
+## 更新日志
 
-## 版本历史
-
-### v3.6.0 — 三电置信度与频次排序增强（2026-08-12）
-
-| # | 新增项 | 文件 |
-|---|------|------|
-| 1 | 向导候选码显式置信度 `weight`：`three_electric_guide.json` 候选码改为对象式 `{code, weight}`（0-100），新增 `get_option_codes`/`get_option_weights` 单一解析；weight 贯穿 worker(`priority_weights`) → `diagnose_multiple` → `MultiCodeDiagnosticResult.priority_weights` → AI prompt（渲染「置信度 x%」）→ 结果面板「🎯 高疑似 x%」徽标。顺序仅作 tie-breaker | `data/seed/three_electric_guide.json`, `src/engine/three_electric.py`, `src/ui/three_electric_panel.py`, `src/engine/diagnostic.py`, `src/ai/llm_client.py`, `src/ai/prompt_templates.py`, `src/ui/result_panel.py` |
-| 2 | `obd_codes` 新增 `frequency` 列（0-100 确定性 seed，EV 系统码由生成脚本稳定哈希填充，老库 `_migrate_add_column` 自动补列）；`build_overview` 高频码排序 = severity 主键 + frequency 次键 | `src/database/schema.py`, `src/database/db_manager.py`, `scripts/generate_ev_system_codes.py`, `scripts/seed_db.py`, `data/seed/ev_system_codes.csv`, `src/engine/three_electric.py` |
-| 3 | P0Axx/消息关键词收敛单一真源：`THREE_ELECTRIC` 各子系统 `keywords` + `get_expert_keywords`/`match_keywords`；`_select_expert` 删除硬编码 battery/motor/vcu 关键词与 P0A 电机描述词 | `src/engine/three_electric.py`, `src/ai/agent.py` |
-| 4 | `dist/` 历史 exe 归档：旧版本移入 `dist/archive/`，仅保留最新版 | `dist/` |
-| 5 | 测试 587 → 598（weight 解析/透传/渲染、frequency 迁移/排序、关键词收敛）；文档/spec/版本同步 v3.6.0 | `tests/`, `src/version.py`, `EV-Diag-Tool.spec`, `README.md`, `CLAUDE.md` |
-| 6 | 在线验证 + 打包：`verify_features.py` 45/45 全绿（Ollama qwen2.5:7b）；`pyinstaller` 生成 v3.6.0 exe 冒烟启动通过 | `scripts/verify_features.py`, `EV-Diag-Tool.spec`, `dist/` |
-
-### v3.5.1 — 三电诊断增强（2026-08-10）
-
-| # | 新增项 | 文件 |
-|---|------|------|
-| 1 | 向导候选码 → 「🎯 高疑似」标记：`three_electric_guide.json` 的候选码顺序作为高疑似提示，贯穿 worker → `diagnose_multiple` → AI prompt（新增「高疑似候选码」段）→ 结果面板（高疑似码排前并带标记，不依赖 AI 也有合理排序） | `src/ui/three_electric_panel.py`, `src/ui/result_panel.py`, `src/engine/diagnostic.py`, `src/ai/prompt_templates.py`, `src/ai/llm_client.py` |
-| 2 | 三电报告导出增强：symptom_context（诊断对象/现象/排查提示）进入 PDF/HTML/txt 报告的「症状描述」；聚合逻辑收敛为 `export_utils.aggregate_multi_knowledge`（主窗口与三电面板共用，修复原面板版丢严重度/原因/步骤的问题） | `src/ui/export_utils.py`, `src/ui/main_window.py`, `src/ui/three_electric_panel.py` |
-| 3 | 修复 `do_sync_db` 注释与实现不符：DB 无详情时不再用空值覆盖 CSV 原有详情（提取 `_merge_sync_rows` 纯函数） | `scripts/generate_ev_system_codes.py`, `tests/test_generate_ev_codes.py` |
-| 4 | Ollama 在线验证：`build_multi_diagnostic_prompt` 排序指令在 qwen2.5:7b 实测有效（高疑似码排前）；`verify_features.py` 45/45 全绿 | 文档同步 |
-| 5 | 打包验证：`pyinstaller` 生成 v3.5.1 exe 并可正常启动；文档/测试数同步（567 → 582） | `EV-Diag-Tool.spec`, `README.md`, `CLAUDE.md` |
-| 6 | 域映射单一真源：`THREE_ELECTRIC` 收敛专家路由（`get_subsystem_for_system`/`get_expert_name`/`get_expert_domains`），`_select_expert` 删除硬编码 EV 系统码 if 链；`expert_context.json` domains 与之一致性测试兜底。新增 EV 系统码只需改一处 | `src/engine/three_electric.py`, `src/ai/agent.py`, `tests/test_three_electric.py`, `tests/test_ev_codes.py` |
-| 7 | `build_overview` 收窄异常：`except Exception` → `except (KeyError, TypeError, AttributeError)`（不再吞 KB 结构错误） | `src/engine/three_electric.py` |
-
-### v3.5.0 — 三电诊断（2026-08-07）
-
-| # | 新增项 | 文件 |
-|---|------|------|
-| 1 | 新增 EV-VCU 电控系统码 50 条（上电时序/通信/扭矩仲裁/高压许可等），EV 系统码 350→400，故障码总数 9079→9129；`--upsert-db` 改为先删后插保证幂等 | `data/seed/ev_system_codes.csv`, `scripts/generate_ev_system_codes.py`, `scripts/synthesize_ev_details.py` |
-| 2 | 三电领域引擎：battery（BMS/HV/OBC/DC-DC/热管理 250 码）/ motor（电机/再生制动 100 码）/ vcu（电控 50 码），含向导加载 + 覆盖概览统计 | `src/engine/three_electric.py` |
-| 3 | 手写三电向导 JSON：3 子系统 × 4 症状流 × 3 选项，候选码全部命中真实码 | `data/seed/three_electric_guide.json` |
-| 4 | 三电诊断 UI：独立 Tab + 子系统切换 + 每页概览/向导/内嵌 ResultPanel 多码诊断 + 导出 | `src/ui/three_electric_panel.py`, `src/ui/main_window.py` |
-| 5 | AI 专家重构为三电体系：battery/motor/vcu/general，EV-THERMAL→电池域，EV-VCU→电控域 | `data/seed/expert_context.json`, `src/ai/agent.py`, `src/ai/prompt_templates.py`, `src/ai/diagnostic_tools.py` |
-| 6 | 数据/专家路由测试同步，新增三电引擎/向导/UI 测试 | `tests/test_ev_codes.py`, `tests/test_ai.py`, `tests/test_diagnostic_tools.py`, `tests/test_three_electric.py`, `tests/test_ui_three_electric.py` |
-
-### v3.4.4 — EV 码扩充至 350（2026-08-07）
-
-| # | 修复/新增项 | 文件 |
-|---|------|------|
-| 1 | EV 系统码 146 → 350（每系统 50，7 系统），故障码总数 8875→9079 | `data/seed/ev_system_codes.csv`, `scripts/generate_ev_system_codes.py` |
-| 2 | 新增确定性详情生成脚本（纯模板，取代卡死的 Ollama 批量增强）：为新增 204 条 EV 码回填 `detail/common_causes/diagnostic_steps/symptoms`，已存在 AI 详情保留不动 | `scripts/synthesize_ev_details.py` |
-| 3 | `generate_ev_system_codes.py` 新增 `--merge`（幂等追加新码）/ `--sync-db`（DB 详情回写 CSV）模式 | `scripts/generate_ev_system_codes.py` |
-| 4 | 更新 EV 码测试：每系统 ≥20 → ≥50，新增 `test_total_codes_ge_300` | `test_ev_codes.py` |
-
-### v3.4.3 — EV 码知识库扩充（2026-08-05）
-
-| # | 修复/新增项 | 文件 |
-|---|------|------|
-| 1 | 新增 146 条 EV 系统码（BMS 22 / MOTOR 22 / OBC 22 / DC-DC 20 / THERMAL 20 / HV 20 / REGEN 20），全部 AI 增强含中文详情，故障码总数 8729→8875 | `data/seed/ev_system_codes.csv`, `scripts/generate_ev_system_codes.py` |
-| 2 | `parse_fault_codes` 支持 `EV-XXX-NNN` 格式输入解析（与历史导出拆分一致），补 7 个回归测试 | `diagnostic.py`, `test_bug_fixes.py` |
-| 3 | 专家路由扩充：EV-OBC/EV-DCDC → BMS 专家，EV-REGEN → 电机专家（域名 + `_select_expert`） | `expert_context.json`, `agent.py` |
-| 4 | `seed_db.py` 接入 ev_system_codes.csv | `seed_db.py` |
-| 5 | 修复 5 个导出/症状区/死代码 bug（多码导出崩溃、历史导出 EV 码、症状区重置、死代码）+ 16 回归测试 | `main_window.py`, `result_panel.py`, `agent_chat.py`, `test_bug_fixes.py` |
-| 6 | 新增 EV 码数据完整性测试（CSV 格式/可导入/查询链路/专家路由） | `test_ev_codes.py` |
-
-### v3.4.2 — 死代码清理 + 流式渲染修复 + CI（2026-08-04）
-
-| # | 修复项 | 文件 |
-|---|--------|------|
-| 1 | 清理死代码：`diagnose_multi`/`MultiCodeResult`/`CorrelationAnalyzer`/`CorrelationResult`/`export_multi_as_text`/`export_multi_as_html`/`get_multi_code_suggestion`/`DiagnosticContext`（均无调用点） | `diagnostic.py`, `correlation.py`(删), `export_utils.py`, `llm_client.py`, `context.py`(删) |
-| 2 | 流式粗体跨 token 泄漏字面 `**`（逐字符/分段到达时）→ 新增 `StreamMarkdownRenderer` 状态机，粗体内容延迟到闭合后渲染 | `markdown_renderer.py`, `agent_chat.py` |
-| 3 | GitHub Actions CI（Python 3.10/3.11/3.12 + pytest + 覆盖率门限 30%） | `.github/workflows/ci.yml` |
-| 4 | 数据覆盖 98.2% → 100%（8729 条全部有详情） | 文档同步 |
-| 5 | 补 ReAct 主循环测试（直接回答/工具循环/Ollama 剥离/OpenAI 保留/去重/超限/降级） | `test_ai.py` |
-| 6 | 更新打包 spec：移除已删模块 hiddenimports、exe 名 → v3.4.2 | `EV-Diag-Tool.spec` |
-| 7 | 测试总数 151 → 477（新增流式 provider 测试、verify_features 流式端到端、PDF 导出测试、UI 测试） | `test_export_and_markdown.py`, `test_ai.py`, `test_providers.py`, `verify_features.py`, `test_ui_*.py` |
-| 8 | PDF 诊断报告导出（reportlab，中文字体自动回退），UI 导出对话框新增 PDF 选项 | `export_utils.py`, `main_window.py`, `EV-Diag-Tool.spec` |
-
-### v3.4.2 — 安全与健壮性修复（2026-08-04）
-
-| # | 严重度 | 修复项 | 文件 |
-|---|--------|--------|------|
-| 1 | 🔴 CRITICAL | `parse_fault_codes` 正则丢弃 63.7% 含十六进制字母的故障码（P0A00/B001A 等），改为 `[0-9A-Fa-f]{4}` | `diagnostic.py` |
-| 2 | 🔴 HIGH | 多码知识库结果 HTML 未转义（XSS 注入） | `result_panel.py` |
-| 3 | 🔴 HIGH | AI 完成提示中故障码未转义（XSS 注入） | `result_panel.py` |
-| 4 | 🔴 HIGH | ReAct 非流式循环缺少下一轮 LLM 调用，多轮推理失效 | `agent.py` |
-| 5 | 🟠 MEDIUM | Ollama/OpenAI Tool Calling 协议不一致导致 OpenAI 端 400 | `agent.py`（`_build_tool_assistant_msg`） |
-| 6 | 🟠 MEDIUM | availability 永久缓存，服务恢复后仍显示不可用（加 30s TTL） | `ollama.py`, `openai_compat.py` |
-| 7 | 🟠 MEDIUM | worker 生命周期：wait 超时无 terminate、窗口关闭不停止线程 | `main_window.py`（`closeEvent`） |
-| 8 | 🟠 MEDIUM | `_ensure_tables` 不创建 obd_codes 表（空库/清库时查询失败） | `db_manager.py` |
-| 9 | 🟠 MEDIUM | `is_available()` 网络调用持有 provider 锁阻塞 UI | `llm_client.py` |
-| 10 | 🟠 MEDIUM | Agent 预查询正则把英文单词误判为故障码（PLEASE→PLEA） | `agent.py` |
-| 11 | 🟡 LOW | markdown 链接未校验协议（`javascript:` 注入） | `markdown_renderer.py` |
-| 12 | 🟡 LOW | 导出严重程度拼接 class 属性未转义、格式判断仅靠扩展名 | `export_utils.py`, `main_window.py` |
-| 13 | 🟡 LOW | `.env` 写入未净化、数值配置解析无容错 | `config.py` |
-| 14 | 🟡 LOW | `record_symptoms` 读改写竞态、多码历史导出查询失败 | `db_manager.py`, `main_window.py` |
-| 15 | 🟡 LOW | AI 流式出错界面卡在"生成中"占位 | `result_panel.py`（`show_ai_error`） |
-
-### v3.4.1 — Bug 修复（2026-08-04）
-
-| # | 修复项 | 文件 | 说明 |
-|---|--------|------|------|
-| 1 | model_name setter 去重 | `ollama.py`, `openai_compat.py` | 模型名不变时不重置 availability 缓存 |
-| 2 | 多码诊断方法名修正 | `llm_client.py` | `build_multi_code_diagnostic_prompt` → `build_multi_diagnostic_prompt` |
-| 3 | 多码诊断参数修正 | `llm_client.py` | `knowledge_list` → `results`，补充 `correlation_summary` |
-| 4 | 模型选择器保护标志 | `main_window.py` | 防止初始化时误触发 `_on_model_changed` |
-
-### v3.4.0 — 代码审查修复（2026-07-29）
-
-| # | 修复项 | 文件 | 说明 |
-|---|--------|------|------|
-| 1 | 线程安全修复 | `llm_client.py` | `_provider_lock` 初始化移到 `__new__` |
-| 2 | 提取重复逻辑 | `agent.py` | 新增 `_execute_tool_calls` 共享方法 |
-| 3 | 异常处理改善 | `agent.py` | 替换 5 处 `except Exception: pass` |
-| 4 | HTML 转义统一 | `result_panel.py` | 统一转义逻辑 |
-| 5 | DiagnosticContext | `context.py` | 新建数据类封装参数 |
-| 6 | 方法重命名 | `agent.py` | `_prefetch_tools` → `_prefetch_knowledge_for_message` |
-
-### v3.4.0 — 多故障码分析（2026-07-28）
-
-- 新增 `correlation.py` 故障码关联性分析
-- 修复 EV 系统码关联判断过宽
-- 修复多码 AI 流式显示清空问题
-
-### v3.1.0 — 全链路流式 Tool Calling（2026-07-27）
-
-- 新增 `StreamEvent` 数据类
-- Ollama/OpenAI 流式 Tool Calling 实现
-- Agent `run_stream` 方法
-
-### v3.0.0 — 阶段三：AI Agent 版
-
-- 新增 `tools.py` 工具调用框架 + `diagnostic_tools.py` 9 个诊断工具
-- ReAct 模式 Agent 循环
-- 症状关键词映射增强搜索
-
----
-
-## 贡献指南
-
-欢迎贡献！
-
-**你可以这样贡献：**
-- 提交 Issue 报告 bug
-- 补充新的故障码数据
-- 改进诊断逻辑
-- 增加多语言支持
-
----
+各版本变更详见 [CHANGELOG.md](CHANGELOG.md)。
 
 ## 开源协议
 
 本项目采用 MIT 协议。
-
----
-
-## 致谢
-
-- OBD-II 标准参考自 SAE J2012
-- 数据整理参考自多个公开维修资料
-- 感谢所有开源贡献者
-
----
-
-> **最后的话：** 这个项目始于一个简单的想法——让 AI 辅助维修技师，而不是取代他们。技术应该赋能人，而不是替代人。

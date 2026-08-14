@@ -174,6 +174,7 @@ class MainWindow(QMainWindow):
         self._ai_check_worker = None
         self._model_selector_updating = False
         self._init_ui()
+        self._apply_theme()
         self._check_database()
         self._check_ai()
         self._load_vehicle_data()
@@ -441,7 +442,7 @@ class MainWindow(QMainWindow):
             QTabBar::tab {{
                 padding: 10px 20px; font-size: 13px;
                 border: 1px solid transparent;
-                border-bottom: none;
+                border-bottom: none; color: {TEXT_SECONDARY};
             }}
             QTabBar::tab:selected {{
                 background-color: {CARD_BG};
